@@ -1,13 +1,7 @@
 
 -- =============================================================
---  RemoteEvents.luau  (LOBBY PLACE)
---  Akses semua RemoteEvent yang ada di Lobby.
---  Instance-nya didefinisikan di lobby/default.project.json.
---
---  Cara pakai:
---    local RE = require(game.ReplicatedStorage.Shared.RemoteEvents)
---    RE.CreateRoom:FireServer("HARD", "COOP")
---    RE.RoomListUpdated.OnClientEvent:Connect(function(rooms) ... end)
+--  RemoteEvents.luau  (LOBBY PLACE — v2)
+--  Instance didefinisikan di lobby/default.project.json
 -- =============================================================
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,34 +13,51 @@ end
 
 local RemoteEvents = {
 
-    -- Server → semua Client: kirim daftar room yang tersedia
-    -- Payload: { Types.RoomInfo } — array of room info
+    -- ─── ROOM LIST ──────────────────────────────────────────
+    -- Server → semua Client: daftar room yang tersedia
+    -- Payload: { Types.RoomInfo }
     RoomListUpdated  = R("RoomListUpdated"),
 
-    -- Server → semua Client: update state room tertentu (siapa yang join, siapa ready)
+    -- Server → semua Client di room: state room berubah (player join/leave/ready)
     -- Payload: Types.RoomInfo
     RoomStateUpdated = R("RoomStateUpdated"),
 
+    -- ─── ROOM MANAGEMENT ────────────────────────────────────
     -- Client → Server: buat room baru
-    -- Payload: difficulty (string), mode (string)
+    -- Payload: gameMode (GameMode), roomMode (RoomMode)
     CreateRoom       = R("CreateRoom"),
 
-    -- Client → Server: join room yang sudah ada
+    -- Client → Server: join room yang ada
     -- Payload: roomId (string)
     JoinRoom         = R("JoinRoom"),
 
-    -- Client → Server: keluar dari room sebelum start
+    -- Client → Server: keluar room sebelum start
     -- Payload: (tidak ada)
     LeaveRoom        = R("LeaveRoom"),
 
-    -- Client → Server: player ready
+    -- Client → Server: player ready (sudah memilih level lewat vote)
     -- Payload: (tidak ada)
     PlayerReadyUp    = R("PlayerReadyUp"),
 
-    -- Server → semua Client di room: countdown dimulai, teleport incoming
-    -- Payload: countdown (number) — detik sebelum teleport
-    -- Setelah ini Gilang panggil TeleportService:TeleportAsync()
+    -- ─── LEVEL VOTING ───────────────────────────────────────
+    -- Client → Server: player memilih level di room
+    -- Payload: votedLevel (number) — harus 1 ≤ level ≤ RoomInfo.maxLevel
+    VoteForLevel     = R("VoteForLevel"),
+
+    -- Server → semua Client di room: update hasil vote real-time
+    -- Payload: Types.VoteResult { votes, winningLevel, timeRemaining }
+    VoteResultUpdated = R("VoteResultUpdated"),
+
+    -- ─── GAME START ─────────────────────────────────────────
+    -- Server → semua Client di room: voting selesai, countdown teleport
+    -- Payload: selectedLevel (number), gameMode (GameMode), countdown (number)
+    -- Setelah countdown habis: Gilang fire TeleportAsync()
     StartingGame     = R("StartingGame"),
+
+    -- ─── PLAYER PROGRESS ────────────────────────────────────
+    -- Server → Client spesifik: kirim progress player saat join lobby
+    -- Payload: Types.PlayerProgress { unlockedLevel, highestEndless }
+    PlayerProgressLoaded = R("PlayerProgressLoaded"),
 }
 
 return RemoteEvents

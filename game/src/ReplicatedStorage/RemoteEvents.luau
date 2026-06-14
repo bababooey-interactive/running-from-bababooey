@@ -1,13 +1,7 @@
 
 -- =============================================================
---  RemoteEvents.luau  (LOBBY PLACE)
---  Akses semua RemoteEvent yang ada di Lobby.
---  Instance-nya didefinisikan di lobby/default.project.json.
---
---  Cara pakai:
---    local RE = require(game.ReplicatedStorage.Shared.RemoteEvents)
---    RE.CreateRoom:FireServer("HARD", "COOP")
---    RE.RoomListUpdated.OnClientEvent:Connect(function(rooms) ... end)
+--  RemoteEvents.luau  (GAME PLACE — v2)
+--  Instance didefinisikan di game/default.project.json
 -- =============================================================
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,34 +13,84 @@ end
 
 local RemoteEvents = {
 
-    -- Server → semua Client: kirim daftar room yang tersedia
-    -- Payload: { Types.RoomInfo } — array of room info
-    RoomListUpdated  = R("RoomListUpdated"),
+    -- ─── SETUP ──────────────────────────────────────────────
+    -- Client → Server: tiap player kirim teleport data ke game server
+    -- Payload: Types.TeleportPayload { mode, level, roomId, hostMaxLevel }
+    -- Game server kumpulkan dari semua player → init game
+    TeleportDataReceived = R("TeleportDataReceived"),
 
-    -- Server → semua Client: update state room tertentu (siapa yang join, siapa ready)
-    -- Payload: Types.RoomInfo
-    RoomStateUpdated = R("RoomStateUpdated"),
+    -- ─── RULES ──────────────────────────────────────────────
+    -- Server → semua Client: rules yang aktif ronde ini
+    -- Payload: Types.ActiveRules — array of string (bisa ada duplikat)
+    -- Gilang fire, Arkan & Julian listen
+    RulesActivated       = R("RulesActivated"),
 
-    -- Client → Server: buat room baru
-    -- Payload: difficulty (string), mode (string)
-    CreateRoom       = R("CreateRoom"),
+    -- ─── MAP ────────────────────────────────────────────────
+    -- Server → semua Client: grid setelah generate selesai
+    -- Payload: Types.Grid + Types.LevelConfig (untuk skala minimap)
+    -- Gilang fire, Julian listen (minimap), Arkan listen (pathfinding grid)
+    MapGenerated         = R("MapGenerated"),
 
-    -- Client → Server: join room yang sudah ada
-    -- Payload: roomId (string)
-    JoinRoom         = R("JoinRoom"),
+    -- ─── TASKS ──────────────────────────────────────────────
+    -- Server → semua Client: progress task terbaru
+    -- Payload: Types.TaskProgress
+    TaskProgressUpdated  = R("TaskProgressUpdated"),
 
-    -- Client → Server: keluar dari room sebelum start
-    -- Payload: (tidak ada)
-    LeaveRoom        = R("LeaveRoom"),
+    -- Client → Server: player selesaikan 1 task object
+    -- Payload: taskType ("coal"|"lever"|"battery"), taskObjectId (string)
+    PlayerInteractTask   = R("PlayerInteractTask"),
 
-    -- Client → Server: player ready
-    -- Payload: (tidak ada)
-    PlayerReadyUp    = R("PlayerReadyUp"),
+    -- ─── SURVIVAL ───────────────────────────────────────────
+    -- Server → Client spesifik: update survival state player tsb
+    -- Payload: Types.SurvivalState { hunger, darkTimer, isDead }
+    SurvivalUpdated      = R("SurvivalUpdated"),
 
-    -- Server → semua Client di room: countdown dimulai, teleport incoming
-    -- Payload: countdown (number) — detik sebelum teleport
-    -- Setelah ini Gilang panggil TeleportService:TeleportAsync()
-    StartingGame     = R("StartingGame"),
+    -- Client → Server: player bikin suara
+    -- Payload: noiseLevel (number 0–1), worldPosition (Vector3)
+    -- Arkan listen di SensorSystem untuk trigger hearing monster
+    PlayerMakeNoise      = R("PlayerMakeNoise"),
+
+    -- ─── CONVEYOR BELT ──────────────────────────────────────
+    -- Server → Client: player masuk/keluar zona conveyor belt
+    -- Payload: isOnConveyor (boolean), direction (Vector3 — arah push)
+    -- Julian listen untuk apply / stop BodyVelocity di client character
+    ConveyorStateChanged = R("ConveyorStateChanged"),
+
+    -- ─── DEATH & REVIVE ─────────────────────────────────────
+    -- Server → semua Client: player mati
+    -- Payload: playerName (string)
+    PlayerDied           = R("PlayerDied"),
+
+    -- Server → semua Client: player di-revive
+    -- Payload: playerName (string)
+    PlayerRevived        = R("PlayerRevived"),
+
+    -- Client → Server: player bawa body ke fireplace
+    -- Payload: targetPlayerName (string)
+    ReviveRequest        = R("ReviveRequest"),
+
+    -- ─── MONSTER ────────────────────────────────────────────
+    -- Server → semua Client: posisi & state monster terbaru (untuk minimap)
+    -- Payload: { position: Vector3, state: Types.MonsterState, monsterIndex: number }
+    -- Arkan fire tiap ~0.5s per monster instance
+    MonsterPosition      = R("MonsterPosition"),
+
+    -- ─── LEVEL FLOW ─────────────────────────────────────────
+    -- Server → semua Client: semua task selesai, level cleared!
+    -- Regular mode: tampilkan screen "Level X Clear!" → teleport balik ke lobby
+    -- Endless mode: tampilkan screen → reset server untuk level berikutnya (NO teleport)
+    -- Payload: Types.EndlessLevelResult { levelCleared, nextLevel, nextConfig }
+    LevelCleared         = R("LevelCleared"),
+
+    -- Server → semua Client: player ketangkap / seluruh team mati = game over
+    -- Payload: finalLevel (number), gameMode (GameMode)
+    -- Setelah ini: Julian tampilkan result screen → teleport balik ke lobby
+    GameOver             = R("GameOver"),
+
+    -- Server → Client spesifik: konfirmasi level baru sudah disave ke DataStore
+    -- Payload: newUnlockedLevel (number)
+    -- Hanya di Regular mode, hanya player yang unlock level baru
+    LevelProgressSaved   = R("LevelProgressSaved"),
 }
 
 return RemoteEvents
