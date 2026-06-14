@@ -51,6 +51,7 @@ Constants.Rules = {
     MONSTER_HEAR_PLUS = "monster_hear_plus",
     MONSTER_DUPLICATE = "monster_duplicate",
     MONSTER_FAST      = "monster_fast",
+    MONSTER_REACH     = "monster_reach",
 
     PLAYER_HUNGER     = "player_hunger",
     PLAYER_DARK_TIMER = "player_dark_timer",
@@ -97,6 +98,6 @@ Constants.MONSTER_VISION_ANGLE  = 60
 --  REVIVE (coop)
 -- ─────────────────────────────────────────────
 
-Constants.REVIVE_TIMER = 60
+Constants.REVIVE_TIMER = 10
 
 return Constants
