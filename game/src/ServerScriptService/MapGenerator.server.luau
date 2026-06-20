@@ -1,7 +1,14 @@
 local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local MapGeneratedEvent = Remotes:WaitForChild("MapGenerated")
 
+-- Create a Server-to-Server BindableEvent
+local ServerMapBindable = Instance.new("BindableEvent")
+ServerMapBindable.Name = "ServerMapGenerated"
+ServerMapBindable.Parent = ReplicatedStorage
 -- ============================================================
 -- CONFIG
 -- ============================================================
@@ -670,6 +677,14 @@ local function generateMap()
 	movePlayersToSpawn(hallInfo)
 
 	print("Generated fixed main hall with randomized side corridors and conveyor.")
+
+    -- 1. Fire the RemoteEvent for Julian's Minimap (Server -> Client)
+    MapGeneratedEvent:FireAllClients(grid, hallInfo)
+
+    -- 2. Fire the BindableEvent for Arkan's Monster (Server -> Server)
+    ServerMapBindable:Fire(grid, hallInfo)
 end
 
+-- Wait a bit so the MonsterAI has time to wake up, then generate!
+task.wait(2)
 generateMap()
