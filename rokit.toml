@@ -5,3 +5,4 @@
 
 [tools]
 argon = "argon-rbx/argon@2.0.29"
+stylua = "JohnnyMorganz/stylua@2.5.2"
