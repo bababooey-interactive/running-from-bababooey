@@ -291,19 +291,14 @@ local function carveMainHall(grid)
 	-- endRow+1 supaya tile FIREPLACE (di endRow) tidak ditimpa balik
 	-- jadi FLOOR/CONVEYOR oleh loop di bawah ini.
 	for row = endRow + 1, startRow do
-
-
 		for col = hallLeft, hallRight do
-
 			setTile(
 				grid,
 				col,
 				row,
 				Tile.FLOOR
 			)
-
 		end
-
 
 		setTile(
 			grid,
@@ -339,25 +334,16 @@ local function carveMainHall(grid)
 	)
 
 	return {
-
 		centerCol=centerCol,
-
 		hallLeft=hallLeft,
 		hallRight=hallRight,
-
 		startRow=startRow,
 		endRow=endRow,
-
-
 		spawnCol=centerCol,
 		spawnRow=startRow,
-
-
 		fireplaceCol=centerCol,
 		fireplaceRow=endRow
-
 	}
-
 end
 
 local function carveSideBranch(
@@ -366,32 +352,21 @@ local function carveSideBranch(
 	startRow,
 	direction
 )
-
-
 	local length =
 		math.random(
 			SIDE_BRANCH_MIN_LENGTH,
 			SIDE_BRANCH_MAX_LENGTH
 		)
 
-
 	local col=startCol
 	local row=startRow
 
-
-
 	for i=1,length do
-
-
 		col += direction
-
-
 
 		if not isInsideGrid(col,row) then
 			break
 		end
-
-
 
 		setTile(
 			grid,
@@ -399,70 +374,41 @@ local function carveSideBranch(
 			row,
 			Tile.FLOOR
 		)
-
-
-
 		-- random belokan
-
 		if math.random() < 0.35 then
-
-
 			local turn =
 				math.random(0,1)==0
 				and -1
 				or 1
-
-
+			
 			row += turn
 
-
-
 			if isInsideGrid(col,row) then
-
 				setTile(
 					grid,
 					col,
 					row,
 					Tile.FLOOR
 				)
-
 			end
-
 		end
-
-
 	end
-
 end
 
-local function carveRandomSideCorridors(
-	grid,
-	hallInfo
-)
-
-
+local function carveRandomSideCorridors(grid, hallInfo)
 	for row =
 		hallInfo.endRow + 2,
 		hallInfo.startRow - 2,
 		2 do
-
-
-
 		-- kiri
-
 		if math.random() < SIDE_BRANCH_CHANCE then
-
-
 			-- buat pintu koneksi
-
 			setTile(
 				grid,
 				hallInfo.hallLeft-1,
 				row,
 				Tile.FLOOR
 			)
-
-
 
 			carveSideBranch(
 				grid,
@@ -470,19 +416,9 @@ local function carveRandomSideCorridors(
 				row,
 				-1
 			)
-
-
 		end
-
-
-
-
-
 		-- kanan
-
 		if math.random() < SIDE_BRANCH_CHANCE then
-
-
 			setTile(
 				grid,
 				hallInfo.hallRight+1,
@@ -490,30 +426,20 @@ local function carveRandomSideCorridors(
 				Tile.FLOOR
 			)
 
-
-
 			carveSideBranch(
 				grid,
 				hallInfo.hallRight+1,
 				row,
 				1
 			)
-
-
 		end
-
-
 	end
-
-
 end
 
 local function buildLayout()
 	local grid = createGrid()
 	local hallInfo = carveMainHall(grid)
-
 	carveRandomSideCorridors(grid, hallInfo)
-
 	return grid, hallInfo
 end
 
@@ -874,12 +800,7 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType)
 	end
 end
 
-local function placeFireplace(
-	mapFolder,
-	hallInfo
-)
-
-
+local function placeFireplace(mapFolder, hallInfo)
 	local basePos =
 		gridToWorld(
 			hallInfo.fireplaceCol,
@@ -903,7 +824,6 @@ local function placeFireplace(
 			true
 		)
 	else
-
 		local fireplaceMock =
 			createPart(
 			"Mock_Fireplace",
@@ -926,7 +846,6 @@ local function placeFireplace(
 		fireplaceMock.Parent =
 			mapFolder
 	end
-
 	-- Pastikan ada dinding penutup tepat di belakang fireplace (sisi N),
 	-- supaya tidak ada celah ke luar map di balik fireplace, terlepas
 	-- dari apakah tile di belakangnya kebetulan walkable atau tidak.
