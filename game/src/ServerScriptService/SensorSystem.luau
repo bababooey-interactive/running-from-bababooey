@@ -1,36 +1,23 @@
-
 -- =============================================================
---  SensorSystem.luau  (ModuleScript — Day 4-6)
---  Monster perception: Hearing (active), Smell/Vision (stubs for Day 7)
---
---  require() dari MonsterAI.server.luau (server-side only)
---  Semua data noise disimpan di sini, tidak replikasi ke client.
+--  SensorSystem.luau  (ModuleScript — Day 4-7, COMPLETE)
+--  Day 7 additions: real vision raycast + IsPlayerInLight
 -- =============================================================
 
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
 local SensorSystem = {}
 
--- ─────────────────────────────────────────────
---  NOISE EVENT STORE
---  Diisi oleh server saat menerima PlayerMakeNoise RemoteEvent
---  atau saat player selesaikan task (coal drop, lever pull, dst.)
--- ─────────────────────────────────────────────
+-- ─── Noise Store ──────────────────────────────────────────────
 
 type NoiseEvent = {
 	player   : Player,
 	position : Vector3,
-	level    : number,   -- 0..1, besar = lebih keras
-	expireAt : number,   -- os.clock() saat noise expire
+	level    : number,
+	expireAt : number,
 }
 
 local noiseEvents : {NoiseEvent} = {}
-local NOISE_LIFETIME = 3.5   -- detik sebelum noise event expired
-
--- ─────────────────────────────────────────────
---  PUBLIC: tambah noise event baru
---  Dipanggil dari MonsterAI saat menerima PlayerMakeNoise
--- ─────────────────────────────────────────────
+local NOISE_LIFETIME = 3.5
 
 function SensorSystem.AddNoise(player : Player, position : Vector3, level : number)
 	table.insert(noiseEvents, {
@@ -41,88 +28,75 @@ function SensorSystem.AddNoise(player : Player, position : Vector3, level : numb
 	})
 end
 
--- ─────────────────────────────────────────────
---  INTERNAL: hapus noise yang sudah expired
--- ─────────────────────────────────────────────
-
 local function cleanNoise()
 	local now = os.clock()
 	for i = #noiseEvents, 1, -1 do
-		if now >= noiseEvents[i].expireAt then
-			table.remove(noiseEvents, i)
-		end
+		if now >= noiseEvents[i].expireAt then table.remove(noiseEvents, i) end
 	end
 end
 
--- ─────────────────────────────────────────────
---  HEARING CHECK
---  Returns noise event terkuat dalam radius, atau nil.
---  Rule MONSTER_HEAR harus aktif.
--- ─────────────────────────────────────────────
+-- ─── Hearing ──────────────────────────────────────────────────
 
-function SensorSystem.CheckHearing(
-	monsterPos  : Vector3,
-	activeRules : {string}
-) : NoiseEvent?
-
-	if not table.find(activeRules, Constants.Rules.MONSTER_HEAR) then
-		return nil
-	end
-
+function SensorSystem.CheckHearing(monsterPos : Vector3, activeRules : {string}) : NoiseEvent?
+	if not table.find(activeRules, Constants.Rules.MONSTER_HEAR) then return nil end
 	cleanNoise()
-
 	local hearRadius = Constants.MONSTER_HEAR_RADIUS
-	local bestEvent  : NoiseEvent? = nil
-	local bestScore  = 0
-
+	local best : NoiseEvent? = nil
+	local bestScore = 0
 	for _, event in ipairs(noiseEvents) do
 		local dist = (monsterPos - event.position).Magnitude
 		if dist <= hearRadius then
-			-- Score: lebih keras + lebih dekat = lebih prioritas
 			local score = event.level * (1 - dist / hearRadius)
-			if score > bestScore then
-				bestScore = score
-				bestEvent = event
-			end
+			if score > bestScore then bestScore = score; best = event end
 		end
 	end
-
-	return bestEvent
+	return best
 end
 
--- ─────────────────────────────────────────────
---  SMELL CHECK  (Day 7 — stub)
--- ─────────────────────────────────────────────
+-- ─── Smell (Day 7 — real implementation) ─────────────────────
 
 function SensorSystem.CheckSmell(
-    monsterPos  : Vector3,
-    players     : {Player},
-    activeRules : {string}
+	monsterPos  : Vector3,
+	players     : {Player},
+	activeRules : {string}
 ) : Player?
 
-    if not table.find(activeRules, Constants.Rules.MONSTER_SMELL) then return nil end
-
-    local closestPlayer = nil
-    local closestDist = Constants.MONSTER_SMELL_RADIUS
-
-    for _, player in ipairs(players) do
-        local char = player.Character
-        if not char then continue end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
-
-        local dist = (monsterPos - hrp.Position).Magnitude
-        if dist <= closestDist then
-            closestDist = dist
-            closestPlayer = player
-        end
-    end
-
-    return closestPlayer
+	if not table.find(activeRules, Constants.Rules.MONSTER_SMELL) then return nil end
+	local closest : Player? = nil
+	local closestDist = Constants.MONSTER_SMELL_RADIUS
+	for _, player in ipairs(players) do
+		local char = player.Character
+		if not char then continue end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if not hrp then continue end
+		local dist = (monsterPos - hrp.Position).Magnitude
+		if dist < closestDist then closestDist = dist; closest = player end
+	end
+	return closest
 end
--- ─────────────────────────────────────────────
---  VISION CHECK  (Day 7 — stub)
--- ─────────────────────────────────────────────
+
+-- ─── Lit-area check (Day 7) ───────────────────────────────────
+-- Player dianggap "in light" kalau dekat PointLight yang cukup terang,
+-- OR kalau global ambient sangat terang (game terlalu terang).
+
+function SensorSystem.IsPlayerInLight(position : Vector3) : boolean
+	-- Cek semua PointLight aktif di workspace
+	for _, desc in ipairs(workspace:GetDescendants()) do
+		if not desc:IsA("PointLight") then continue end
+		local parent = desc.Parent
+		if not parent or not parent:IsA("BasePart") then continue end
+		if not desc.Enabled or desc.Brightness < 0.3 then continue end
+		local dist = (position - parent.Position).Magnitude
+		-- Player lit kalau dalam 65% dari range light
+		if dist < desc.Range * 0.65 then return true end
+	end
+	-- Fallback: cek ambient global (gelap = tidak lit)
+	local amb = game.Lighting.Ambient
+	local avgBrightness = (amb.R + amb.G + amb.B) / 3
+	return avgBrightness > 0.45
+end
+
+-- ─── Vision (Day 7 — full raycast + lit area) ─────────────────
 
 function SensorSystem.CheckVision(
 	monster     : Model,
@@ -131,19 +105,58 @@ function SensorSystem.CheckVision(
 	activeRules : {string}
 ) : Player?
 
-	if not table.find(activeRules, Constants.Rules.MONSTER_SEE) then
-		return nil
+	if not table.find(activeRules, Constants.Rules.MONSTER_SEE) then return nil end
+
+	local rootPart = monster:FindFirstChild("HumanoidRootPart")
+		or monster:FindFirstChild("rb")
+		or monster.PrimaryPart
+	if not rootPart then return nil end
+
+	local visionRange  = Constants.MONSTER_VISION_RANGE
+	local halfAngleCos = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
+	local forward      = rootPart.CFrame.LookVector
+	local eyePos       = monsterPos + Vector3.new(0, 1.5, 0)   -- monster eye height
+
+	-- Raycast param: exclude monster model itself
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {monster}
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	for _, player in ipairs(players) do
+		local char = player.Character
+		if not char then continue end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if not hrp then continue end
+
+		local dir  = hrp.Position - monsterPos
+		local dist = dir.Magnitude
+		if dist < 0.1 or dist > visionRange then continue end
+
+		-- ── 1. Cone check ─────────────────────────────────────
+		if forward:Dot(dir.Unit) < halfAngleCos then continue end
+
+		-- ── 2. Occlusion raycast ──────────────────────────────
+		-- Cast from monster eye toward player head
+		local playerHeadPos = hrp.Position + Vector3.new(0, 1.5, 0)
+		local rayDir = playerHeadPos - eyePos
+
+		-- Temporarily exclude player char from filter so ray CAN hit other things
+		local result = workspace:Raycast(eyePos, rayDir, rayParams)
+
+		-- If ray hit something that is NOT the player → blocked
+		if result and not result.Instance:IsDescendantOf(char) then
+			continue
+		end
+
+		-- ── 3. Player must be in lit area ─────────────────────
+		if not SensorSystem.IsPlayerInLight(hrp.Position) then continue end
+
+		return player
 	end
-	-- Implementation: Day 7 (raycast + lit area check)
 	return nil
 end
 
--- ─────────────────────────────────────────────
---  AWARENESS LEVEL  (0..1, per player)
---  Dipakai untuk update UI indicator milik player.
---  0 = monster tidak tahu keberadaan player
---  1 = monster sangat fokus ke player ini
--- ─────────────────────────────────────────────
+-- ─── Awareness level for UI ───────────────────────────────────
 
 function SensorSystem.GetAwarenessForPlayer(
 	monsterPos  : Vector3,
@@ -159,66 +172,53 @@ function SensorSystem.GetAwarenessForPlayer(
 	local hrp = char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return 0 end
 
-	-- Kalau monster sedang CHASE dan target adalah player ini → full awareness
-	if isChasing and chaseTarget == player then
-		return 1.0
-	end
+	if isChasing and chaseTarget == player then return 1.0 end
 
-	local playerPos  = hrp.Position
-	local awareness  = 0
+	local playerPos = hrp.Position
+	local awareness = 0
 
-	-- Kontribusi HEARING: cek apakah ada noise event dari player ini dekat monster
 	if table.find(activeRules, Constants.Rules.MONSTER_HEAR) then
 		cleanNoise()
 		for _, event in ipairs(noiseEvents) do
 			if event.player ~= player then continue end
 			local dist = (monsterPos - event.position).Magnitude
 			if dist <= Constants.MONSTER_HEAR_RADIUS then
-				local contribution = event.level * (1 - dist / Constants.MONSTER_HEAR_RADIUS)
-				awareness = math.max(awareness, contribution * 0.85)
+				local c = event.level * (1 - dist / Constants.MONSTER_HEAR_RADIUS) * 0.85
+				awareness = math.max(awareness, c)
 			end
 		end
 	end
 
-	-- Kontribusi SMELL
 	if table.find(activeRules, Constants.Rules.MONSTER_SMELL) then
 		local dist = (monsterPos - playerPos).Magnitude
 		if dist <= Constants.MONSTER_SMELL_RADIUS then
-			local contribution = (1 - dist / Constants.MONSTER_SMELL_RADIUS) * 0.7
-			awareness = math.max(awareness, contribution)
+			awareness = math.max(awareness, (1 - dist / Constants.MONSTER_SMELL_RADIUS) * 0.7)
 		end
 	end
 
-	-- Kontribusi VISION (cone check saja, raycast di Day 7)
-    if table.find(activeRules, Constants.Rules.MONSTER_SEE) then
-        local rootPart = monster:FindFirstChild("rb") or monster.PrimaryPart
-        if rootPart then
-            local dir  = (playerPos - monsterPos)
-            local dist = dir.Magnitude
-            if dist <= Constants.MONSTER_VISION_RANGE then
-                if dist < 0.1 then
-                    -- Prevent NaN error if distance is exactly 0
-                    awareness = 1
-                else
-                    local cosAngle  = rootPart.CFrame.LookVector:Dot(dir.Unit)
-                    local halfAngle = math.rad(Constants.MONSTER_VISION_ANGLE)
-                    if cosAngle >= math.cos(halfAngle) then
-                        local contribution = (1 - dist / Constants.MONSTER_VISION_RANGE) * cosAngle
-                        awareness = math.max(awareness, contribution)
-                    end
-                end
-            end
-        end
-    end
+	if table.find(activeRules, Constants.Rules.MONSTER_SEE) then
+		local rp = monster:FindFirstChild("HumanoidRootPart")
+			or monster:FindFirstChild("rb")
+			or monster.PrimaryPart
+		if rp then
+			local dir  = playerPos - monsterPos
+			local dist = dir.Magnitude
+			if dist >= 0.1 and dist <= Constants.MONSTER_VISION_RANGE then
+				local cosA = rp.CFrame.LookVector:Dot(dir.Unit)
+				local half = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
+				if cosA >= half then
+					local inLight = SensorSystem.IsPlayerInLight(playerPos)
+					local contrib = inLight
+						and (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA
+						or  (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.2
+					awareness = math.max(awareness, contrib)
+				end
+			end
+		end
+	end
 
 	return math.clamp(awareness, 0, 1)
 end
-
--- ─────────────────────────────────────────────
---  NOISE LEVEL PROXY
---  Dipakai MonsterAI untuk kirim "noise level player" ke UI
---  (berapa keras player saat ini dari sudut pandang noise store)
--- ─────────────────────────────────────────────
 
 function SensorSystem.GetRecentNoiseForPlayer(player : Player) : number
 	cleanNoise()
