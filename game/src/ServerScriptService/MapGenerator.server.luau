@@ -13,6 +13,15 @@ ServerMapBindable.Parent = ReplicatedStorage
 -- CONFIG
 -- ============================================================
 
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(char)
+		local hum =
+			char:WaitForChild("Humanoid")
+		hum.JumpPower = 35
+		hum.UseJumpPower = true
+	end)
+end)
+
 local TILE_SIZE = 16
 
 local MAP_WIDTH = 15
@@ -42,6 +51,11 @@ local RUBBLE_CHANCE = 0.22
 local SHORT_WALL_CHANCE = 0.12
 
 local CONVEYOR_SPEED = 35
+
+-- Margin aman dari tepi tile untuk prop acak (boulder/rubble), supaya
+-- tidak menembus dinding di tile sebelah. TILE_SIZE/2 adalah tepi tile,
+-- jadi kita kurangi sedikit untuk memberi ruang aman.
+local PROP_SAFE_MARGIN = 4 -- offset maksimum dari pusat tile (stud)
 
 -- ============================================================
 -- ASSETS
@@ -220,6 +234,8 @@ local function setPhysicsSafe(object, canCollide)
 		object.CanCollide = canCollide
 		object.CanTouch = true
 		object.CanQuery = true
+		object.CustomPhysicalProperties =
+		PhysicalProperties.new(10, 0.5, 0, 100, 100)
 	end
 
 	for _, descendant in ipairs(object:GetDescendants()) do
@@ -228,6 +244,7 @@ local function setPhysicsSafe(object, canCollide)
 			descendant.CanCollide = canCollide
 			descendant.CanTouch = true
 			descendant.CanQuery = true
+			PhysicalProperties.new(10, 0.5, 0, 100, 100)
 		end
 	end
 end
@@ -258,75 +275,237 @@ end
 -- ============================================================
 
 local function carveMainHall(grid)
+
 	local centerCol = math.ceil(MAP_WIDTH / 2)
 
-	local hallLeft = centerCol - math.floor(MAIN_HALL_WIDTH / 2)
-	local hallRight = hallLeft + MAIN_HALL_WIDTH - 1
+	local hallLeft =
+		centerCol - math.floor(MAIN_HALL_WIDTH / 2)
 
-	local startRow = MAP_HEIGHT - 2
-	local endRow = math.max(3, startRow - MAIN_HALL_LENGTH + 1)
+	local hallRight =
+		hallLeft + MAIN_HALL_WIDTH - 1
 
-	for row = endRow, startRow do
+
+	local startRow = MAP_HEIGHT - 3
+	local endRow = 4
+
+	-- endRow+1 supaya tile FIREPLACE (di endRow) tidak ditimpa balik
+	-- jadi FLOOR/CONVEYOR oleh loop di bawah ini.
+	for row = endRow + 1, startRow do
+
+
 		for col = hallLeft, hallRight do
-			setTile(grid, col, row, Tile.FLOOR)
+
+			setTile(
+				grid,
+				col,
+				row,
+				Tile.FLOOR
+			)
+
 		end
 
-		setTile(grid, centerCol, row, Tile.CONVEYOR)
+
+		setTile(
+			grid,
+			centerCol,
+			row,
+			Tile.CONVEYOR
+		)
+
 	end
 
-	setTile(grid, centerCol, startRow, Tile.SPAWN)
-	setTile(grid, centerCol, endRow - 1, Tile.FIREPLACE)
+	-- floor polos di sekeliling fireplace (kiri & kanan), supaya ruangan
+	-- fireplace punya lebar yang sama dengan hall dan dikelilingi dinding
+	-- yang rapi (bukan cuma 1 tile sempit).
+	for col = hallLeft, hallRight do
+		setTile(grid, col, endRow, Tile.FLOOR)
+	end
+
+	-- spawn player
+	setTile(
+		grid,
+		centerCol,
+		startRow,
+		Tile.SPAWN
+	)
+
+	-- fireplace benar-benar di ujung conveyor
+	-- (di-set TERAKHIR supaya tidak tertimpa tile FLOOR di atas)
+	setTile(
+		grid,
+		centerCol,
+		endRow,
+		Tile.FIREPLACE
+	)
 
 	return {
-		centerCol = centerCol,
-		hallLeft = hallLeft,
-		hallRight = hallRight,
-		startRow = startRow,
-		endRow = endRow,
-		spawnCol = centerCol,
-		spawnRow = startRow,
-		fireplaceCol = centerCol,
-		fireplaceRow = endRow - 1,
+
+		centerCol=centerCol,
+
+		hallLeft=hallLeft,
+		hallRight=hallRight,
+
+		startRow=startRow,
+		endRow=endRow,
+
+
+		spawnCol=centerCol,
+		spawnRow=startRow,
+
+
+		fireplaceCol=centerCol,
+		fireplaceRow=endRow
+
 	}
+
 end
 
-local function carveSideBranch(grid, startCol, startRow, direction)
-	local length = math.random(SIDE_BRANCH_MIN_LENGTH, SIDE_BRANCH_MAX_LENGTH)
+local function carveSideBranch(
+	grid,
+	startCol,
+	startRow,
+	direction
+)
 
-	local col = startCol
-	local row = startRow
 
-	for i = 1, length do
+	local length =
+		math.random(
+			SIDE_BRANCH_MIN_LENGTH,
+			SIDE_BRANCH_MAX_LENGTH
+		)
+
+
+	local col=startCol
+	local row=startRow
+
+
+
+	for i=1,length do
+
+
 		col += direction
 
-		if not isInsideGrid(col, row) then
+
+
+		if not isInsideGrid(col,row) then
 			break
 		end
 
-		setTile(grid, col, row, Tile.FLOOR)
 
-		if i >= 2 and math.random() < 0.35 then
-			local turn = if math.random() < 0.5 then -1 else 1
-			local nextRow = row + turn
 
-			if isInsideGrid(col, nextRow) then
-				row = nextRow
-				setTile(grid, col, row, Tile.FLOOR)
+		setTile(
+			grid,
+			col,
+			row,
+			Tile.FLOOR
+		)
+
+
+
+		-- random belokan
+
+		if math.random() < 0.35 then
+
+
+			local turn =
+				math.random(0,1)==0
+				and -1
+				or 1
+
+
+			row += turn
+
+
+
+			if isInsideGrid(col,row) then
+
+				setTile(
+					grid,
+					col,
+					row,
+					Tile.FLOOR
+				)
+
 			end
+
 		end
+
+
 	end
+
 end
 
-local function carveRandomSideCorridors(grid, hallInfo)
-	for row = hallInfo.endRow + 2, hallInfo.startRow - 2, 2 do
-		if math.random() < SIDE_BRANCH_CHANCE then
-			carveSideBranch(grid, hallInfo.hallLeft - 1, row, -1)
-		end
+local function carveRandomSideCorridors(
+	grid,
+	hallInfo
+)
+
+
+	for row =
+		hallInfo.endRow + 2,
+		hallInfo.startRow - 2,
+		2 do
+
+
+
+		-- kiri
 
 		if math.random() < SIDE_BRANCH_CHANCE then
-			carveSideBranch(grid, hallInfo.hallRight + 1, row, 1)
+
+
+			-- buat pintu koneksi
+
+			setTile(
+				grid,
+				hallInfo.hallLeft-1,
+				row,
+				Tile.FLOOR
+			)
+
+
+
+			carveSideBranch(
+				grid,
+				hallInfo.hallLeft-1,
+				row,
+				-1
+			)
+
+
 		end
+
+
+
+
+
+		-- kanan
+
+		if math.random() < SIDE_BRANCH_CHANCE then
+
+
+			setTile(
+				grid,
+				hallInfo.hallRight+1,
+				row,
+				Tile.FLOOR
+			)
+
+
+
+			carveSideBranch(
+				grid,
+				hallInfo.hallRight+1,
+				row,
+				1
+			)
+
+
+		end
+
+
 	end
+
+
 end
 
 local function buildLayout()
@@ -409,6 +588,22 @@ local function placeWall(mapFolder, col, row, dirName)
 		scale,
 		true
 	)
+	local blocker =
+	Instance.new("Part")
+	blocker.Name = "WallClimbBlocker"
+
+	blocker.Size =
+		Vector3.new(
+			10,
+			14,
+			1
+		)
+
+	blocker.CFrame = CFrame.new(wallPos)
+	blocker.Transparency = 1
+	blocker.Anchored = true
+	blocker.CanCollide = true
+	blocker.Parent = mapFolder
 end
 
 local function placeDecorativeWallDetails(mapFolder, grid, col, row)
@@ -486,30 +681,62 @@ local function placeFloor(mapFolder, col, row, tileType)
 end
 
 local function placeCeiling(mapFolder, col, row, tileType)
-	local basePos = gridToWorld(col, row)
+	local basePos =
+		gridToWorld(col,row)
 
 	local selectedCeiling = CeilingFlat
 
-	if tileType == Tile.CONVEYOR and CeilingArch then
-		selectedCeiling = CeilingArch
-	elseif math.random() < 0.18 and CeilingCrack then
-		selectedCeiling = CeilingCrack
-	elseif math.random() < 0.12 and CeilingStalactite then
-		selectedCeiling = CeilingStalactite
-	else
-		selectedCeiling = CeilingOptions[math.random(1, #CeilingOptions)]
+	if tileType == Tile.CONVEYOR or tileType == Tile.FIREPLACE then
+		if CeilingArch then
+			selectedCeiling = CeilingArch
+		end
+	elseif math.random() < 0.1 then
+		if CeilingCrack then
+			selectedCeiling = CeilingCrack
+		end
 	end
 
-	local ceilingPos = basePos + Vector3.new(0, CEILING_Y_OFFSET, 0)
-	local rotation = math.random(0, 3) * 90
+	local ceilingPos =
+		basePos +
+		Vector3.new(
+			0,
+			CEILING_Y_OFFSET,
+			0
+		)
 
 	cloneAsset(
 		selectedCeiling,
 		mapFolder,
-		CFrame.new(ceilingPos) * CFrame.Angles(0, math.rad(rotation), 0),
+		CFrame.new(ceilingPos),
 		CEILING_SCALE,
-		false
+		true
 	)
+
+end
+
+local function createCeilingCollision(mapFolder, col, row)
+	local pos = gridToWorld(col, row)
+	local ceilingCollider = Instance.new("Part")
+	ceilingCollider.Name = "CeilingCollision"
+	ceilingCollider.Size =
+		Vector3.new(
+			TILE_SIZE,
+			2,
+			TILE_SIZE
+		)
+	ceilingCollider.CFrame =
+		CFrame.new(
+			pos+
+			Vector3.new(
+				0,
+				CEILING_Y_OFFSET,
+				0
+			)
+		)
+	ceilingCollider.Anchored = true
+	ceilingCollider.CanCollide = true
+	ceilingCollider.Transparency = 1
+	ceilingCollider.Parent = mapFolder
 end
 
 local function createConveyorZone(mapFolder, col, row, hallInfo)
@@ -528,7 +755,16 @@ local function createConveyorZone(mapFolder, col, row, hallInfo)
 	zone.CanTouch = true
 	zone.Parent = mapFolder
 
-	local directionToFireplace = Vector3.new(0, 0, -1)
+	local fireplacePos =
+	gridToWorld(
+		hallInfo.fireplaceCol,
+		hallInfo.fireplaceRow
+	)
+
+	local directionToFireplace =
+		(
+			fireplacePos - basePos
+		).Unit
 
 	zone.Touched:Connect(function(hit)
 		if not hit:IsA("BasePart") then
@@ -579,7 +815,33 @@ local function placeConveyorVisual(mapFolder, col, row, hallInfo)
 	createConveyorZone(mapFolder, col, row, hallInfo)
 end
 
-local function placeRandomProp(mapFolder, col, row, tileType)
+-- Hitung offset acak aman untuk prop di dalam 1 tile, dengan mengecek
+-- bahwa arah offset tidak menabrak tile yang non-walkable (dinding).
+-- Ini mencegah boulder/rubble "bocor" ke luar koridor sempit.
+local function getSafePropOffset(grid, col, row, maxOffset)
+	local offsetX = math.random(-maxOffset, maxOffset)
+	local offsetZ = math.random(-maxOffset, maxOffset)
+
+	-- cek tetangga ke arah X
+	if offsetX ~= 0 then
+		local neighborCol = col + (offsetX > 0 and 1 or -1)
+		if not isWalkable(getTile(grid, neighborCol, row)) then
+			offsetX = 0
+		end
+	end
+
+	-- cek tetangga ke arah Z
+	if offsetZ ~= 0 then
+		local neighborRow = row + (offsetZ > 0 and 1 or -1)
+		if not isWalkable(getTile(grid, col, neighborRow)) then
+			offsetZ = 0
+		end
+	end
+
+	return Vector3.new(offsetX, 0, offsetZ)
+end
+
+local function placeRandomProp(mapFolder, grid, col, row, tileType)
 	if tileType == Tile.SPAWN or tileType == Tile.CONVEYOR or tileType == Tile.FIREPLACE then
 		return
 	end
@@ -587,10 +849,12 @@ local function placeRandomProp(mapFolder, col, row, tileType)
 	local basePos = gridToWorld(col, row)
 
 	if FloorRubble and math.random() < RUBBLE_CHANCE then
+		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
+
 		cloneAsset(
 			FloorRubble,
 			mapFolder,
-			CFrame.new(basePos + Vector3.new(math.random(-3, 3), 0.5, math.random(-3, 3))) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + offset + Vector3.new(0, 0.5, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			2,
 			false
 		)
@@ -598,39 +862,75 @@ local function placeRandomProp(mapFolder, col, row, tileType)
 
 	if #BoulderOptions > 0 and math.random() < PROP_CHANCE then
 		local selected = BoulderOptions[math.random(1, #BoulderOptions)]
+		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
 
 		cloneAsset(
 			selected,
 			mapFolder,
-			CFrame.new(basePos + Vector3.new(math.random(-4, 4), 2, math.random(-4, 4))) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + offset + Vector3.new(0, 2, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			PROP_SCALE,
 			true
 		)
 	end
 end
 
-local function placeFireplace(mapFolder, hallInfo)
-	local basePos = gridToWorld(hallInfo.fireplaceCol, hallInfo.fireplaceRow)
+local function placeFireplace(
+	mapFolder,
+	hallInfo
+)
+
+
+	local basePos =
+		gridToWorld(
+			hallInfo.fireplaceCol,
+			hallInfo.fireplaceRow
+		)
+
+	-- Fireplace harus menghadap KE DALAM hall (ke arah startRow / spawn),
+	-- bukan rotasi default. endRow < startRow, jadi dinding "belakang"
+	-- fireplace ada di sisi N (row lebih kecil), dan fireplace harus
+	-- menghadap S (rotasi 180) supaya bukaan apinya menghadap pemain.
+	local fireplaceCFrame =
+		CFrame.new(basePos + Vector3.new(0, 1, 0))
+		* CFrame.Angles(0, math.rad(180), 0)
 
 	if FireplaceAsset then
 		cloneAsset(
 			FireplaceAsset,
 			mapFolder,
-			CFrame.new(basePos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(180), 0),
+			fireplaceCFrame,
 			FIREPLACE_SCALE,
 			true
 		)
 	else
-		local fireplaceMock = createPart(
+
+		local fireplaceMock =
+			createPart(
 			"Mock_Fireplace",
-			Vector3.new(TILE_SIZE, 7, 3),
-			CFrame.new(basePos + Vector3.new(0, 3.5, 0)),
-			Color3.fromRGB(100, 50, 25),
+			Vector3.new(
+				TILE_SIZE,
+				7,
+				3
+			),
+			CFrame.new(
+				basePos+
+				Vector3.new(0,3.5,0)
+			),
+			Color3.fromRGB(
+				100,
+				50,
+				25
+			),
 			Enum.Material.Brick
 		)
-
-		fireplaceMock.Parent = mapFolder
+		fireplaceMock.Parent =
+			mapFolder
 	end
+
+	-- Pastikan ada dinding penutup tepat di belakang fireplace (sisi N),
+	-- supaya tidak ada celah ke luar map di balik fireplace, terlepas
+	-- dari apakah tile di belakangnya kebetulan walkable atau tidak.
+	placeWall(mapFolder, hallInfo.fireplaceCol, hallInfo.fireplaceRow, "N")
 end
 
 local function movePlayersToSpawn(hallInfo)
@@ -662,13 +962,14 @@ local function generateMap()
 			if isWalkable(tileType) then
 				placeFloor(mapFolder, col, row, tileType)
 
-				if tileType == Tile.CONVEYOR then
+				if tileType == Tile.CONVEYOR or tileType == Tile.FIREPLACE then
 					placeConveyorVisual(mapFolder, col, row, hallInfo)
 				end
 
 				placeCeiling(mapFolder, col, row, tileType)
+				createCeilingCollision(mapFolder, col, row)
 				placeWallsAroundFloor(mapFolder, grid, col, row)
-				placeRandomProp(mapFolder, col, row, tileType)
+				placeRandomProp(mapFolder, grid, col, row, tileType)
 			end
 		end
 	end
