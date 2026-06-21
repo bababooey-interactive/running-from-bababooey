@@ -9,7 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SensorSystem = require(script.Parent.SensorSystem)
--- local SoundManager = require(script.Parent.SoundManager)
+local SoundManager = require(script.Parent.SoundManager)
 local DuplicationSystem = require(script.Parent.DuplicationSystem)
 
 -- ── Remote Events ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ assert(rootPart, "[MonsterAI] SoulDragger needs a HumanoidRootPart or part named
 rootPart.Anchored = true
 monster.PrimaryPart = rootPart
 
--- local sounds = SoundManager.new(monster)
+local sounds = SoundManager.new(monster)
 
 -- ── Constants ─────────────────────────────────────────────────
 -- TILE must equal MapGenerator's local TILE_SIZE (currently 16).
@@ -203,6 +203,7 @@ local function beginChase(player: Player)
 	end
 	lostTimer = LOST_TIME
 	state = "CHASE"
+	sounds:onStateChange("CHASE", true)
 end
 
 -- beginIdle ───────────────────────────────────────────────────
@@ -211,7 +212,7 @@ local function beginIdle()
 	chaseTarget = nil
 	idleTarget = nil
 	playMovement("Walk")
-	-- sounds:onStateChange("IDLE", false)
+	sounds:onStateChange("IDLE", false)
 end
 
 -- ── Tentacle Attack Visual ─────────────────────────────────────
@@ -292,6 +293,7 @@ end
 -- beginStrike: lunge → check hit window → catch or miss ───────
 local function beginStrike(player: Player)
 	state = "CATCH"
+	sounds:onStateChange("CATCH", false)
 	playAction("Jumpscare")
 
 	local char = player.Character
@@ -345,6 +347,7 @@ local function beginStrike(player: Player)
 
 		if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
 			-- ✅ Caught! You stood still or walked backwards into it.
+			sounds:playHitSounds()
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
 			if hum then
 				hum.Health = 0
