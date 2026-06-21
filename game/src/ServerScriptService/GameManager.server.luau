@@ -212,17 +212,33 @@ for i, rule in ipairs(session.rules) do
 end
 
 -- ─────────────────────────────────────────────
+--  Broadcast rules ke CLIENT lewat RemoteEvent "RulesActivated"
+--  (sudah dibuat oleh RemoteSetup.server.luau, comment di situ:
+--  "server→all: active rules list" — jadi ini memang sudah
+--  direncanakan tim, kita tinggal pakai).
+--
+--  PENTING: RemoteSetup.server.luau HARUS jalan duluan sebelum
+--  GameManager (urutan di ServerScriptService biasanya alfabetis,
+--  "GameManager" < "RemoteSetup" secara abjad — kalau Studio jalanin
+--  alfabetis, ini bisa salah urutan! Cek Script Order kalau error
+--  "infinite yield" muncul di WaitForChild di bawah ini).
+-- ─────────────────────────────────────────────
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_RulesActivated = Remotes:WaitForChild("RulesActivated")
+
+RE_RulesActivated:FireAllClients(session.rules)
+
+-- ─────────────────────────────────────────────
 --  RulesBindable (BindableEvent, Server -> Server)
 --
---  Untuk Arkan (MonsterAI.server.luau) & siapa pun yang butuh
---  rules begitu sesi mulai, tanpa perlu polling SessionInfo.
---
---  Ditaruh di ReplicatedStorage.Remotes supaya konsisten dengan
---  RemoteEvent lain yang sudah ada di sana (PlayerMakeNoise, dkk).
+--  Untuk script SERVER lain (mis. MonsterAI.server.luau) yang butuh
+--  rules begitu sesi mulai. RemoteEvent "RulesActivated" di atas itu
+--  cuma untuk Server -> Client, TIDAK bisa di-:Connect() dari server
+--  lain (server tidak punya .OnClientEvent). Makanya tetap disediakan
+--  BindableEvent terpisah ini khusus untuk kebutuhan server -> server.
 --
 --  CATATAN PENTING: nama-nya "RulesBindable", BUKAN "RulesActivated".
---  Ada RemoteEvent lain bernama "RulesActivated" yang sudah dibuat
---  duluan oleh RemoteSetup.lua (punya tim) untuk keperluan client-server.
+--  "RulesActivated" sudah dipakai sebagai RemoteEvent (lihat di atas).
 --  RemoteEvent dan BindableEvent itu beda class — RemoteEvent tidak
 --  punya method :Fire() (cuma :FireServer()/:FireClient()/dst), jadi
 --  kalau nama dipakai sama, FindFirstChild akan nemu RemoteEvent itu
@@ -243,13 +259,6 @@ end
 --  mereka akan miss event-nya — dalam kasus itu, baca langsung dari
 --  ReplicatedStorage.SessionInfo.ActiveRules sebagai fallback.
 -- ─────────────────────────────────────────────
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not Remotes then
-    Remotes = Instance.new("Folder")
-    Remotes.Name   = "Remotes"
-    Remotes.Parent = ReplicatedStorage
-end
-
 local RulesBindable = Remotes:FindFirstChild("RulesBindable")
 
 -- Validasi tipe: kalau somehow ada instance lama dengan nama ini tapi

@@ -210,26 +210,28 @@ end
 -- BACA SESSIONINFO & TAMPILKAN
 -- ============================================================
 
-local function readActiveRulesFromSession()
+local function readLevelAndMode()
     local sessionInfo = ReplicatedStorage:WaitForChild("SessionInfo", 10)
 
     if not sessionInfo then
-        warn("[RulesDisplay] SessionInfo tidak ditemukan dalam 10 detik, dibatalkan.")
-        return nil
+        warn("[RulesDisplay] SessionInfo tidak ditemukan dalam 10 detik.")
+        return 1, "REGULAR"
     end
 
-    local level      = sessionInfo:WaitForChild("Level").Value
-    local mode       = sessionInfo:WaitForChild("Mode").Value
-    local rulesFolder = sessionInfo:WaitForChild("ActiveRules")
+    local level = sessionInfo:WaitForChild("Level").Value
+    local mode  = sessionInfo:WaitForChild("Mode").Value
 
+    return level, mode
+end
+
+-- Pisahkan rule id (array of string) jadi 2 grup (monster/player) untuk
+-- ditampilkan. Dipakai baik dari data RemoteEvent maupun dari SessionInfo.
+local function splitRulesByGroup(ruleIds)
     local monsterRules = {}
     local playerRules   = {}
 
-    -- Children sudah diberi nama unik (rule_id .. "_" .. index) di
-    -- GameManager, tapi .Value tetap rule id aslinya, jadi kita pakai
-    -- .Value untuk lookup nama tampilan, bukan .Name.
-    for _, v in ipairs(rulesFolder:GetChildren()) do
-        local info = getRuleInfo(v.Value)
+    for _, ruleId in ipairs(ruleIds) do
+        local info = getRuleInfo(ruleId)
 
         if info.group == "player" then
             table.insert(playerRules, info.text)
@@ -238,12 +240,30 @@ local function readActiveRulesFromSession()
         end
     end
 
-    return {
-        level = level,
-        mode = mode,
-        monsterRules = monsterRules,
-        playerRules = playerRules,
-    }
+    return monsterRules, playerRules
+end
+
+-- Fallback: baca rules dari ReplicatedStorage.SessionInfo.ActiveRules
+-- (Folder of StringValue) kalau RemoteEvent ketinggalan / belum sempat
+-- ditangkap (mis. client baru selesai loading setelah event di-fire).
+local function readRuleIdsFromSessionInfo()
+    local sessionInfo = ReplicatedStorage:WaitForChild("SessionInfo", 10)
+
+    if not sessionInfo then
+        return nil
+    end
+
+    local rulesFolder = sessionInfo:WaitForChild("ActiveRules")
+    local ruleIds = {}
+
+    -- Children sudah diberi nama unik (rule_id .. "_" .. index) di
+    -- GameManager, tapi .Value tetap rule id aslinya, jadi kita pakai
+    -- .Value, bukan .Name.
+    for _, v in ipairs(rulesFolder:GetChildren()) do
+        table.insert(ruleIds, v.Value)
+    end
+
+    return ruleIds
 end
 
 local function showRules(sessionData)
@@ -359,12 +379,52 @@ end
 
 -- ============================================================
 -- INIT
+--
+-- Sumber utama: RemoteEvent "RulesActivated" (Server -> Client),
+-- sudah disiapkan RemoteSetup.server.luau dan di-fire oleh
+-- GameManager.server.luau begitu sesi mulai. Ini lebih cepat &
+-- konsisten dengan rencana tim (lihat komentar RemoteSetup.lua:
+-- "server→all: active rules list").
+--
+-- Fallback: kalau client baru selesai loading SETELAH event itu
+-- di-fire (jadi listener di bawah miss event-nya), baca langsung
+-- dari ReplicatedStorage.SessionInfo.ActiveRules sebagai cadangan,
+-- dengan delay singkat untuk memberi waktu SessionInfo kebentuk.
 -- ============================================================
 
-task.spawn(function()
-    local sessionData = readActiveRulesFromSession()
+local rulesAlreadyShown = false
 
-    if sessionData then
-        showRules(sessionData)
+local function tryShowFromRuleIds(ruleIds)
+    if rulesAlreadyShown then
+        return
+    end
+    rulesAlreadyShown = true
+
+    local level, mode = readLevelAndMode()
+    local monsterRules, playerRules = splitRulesByGroup(ruleIds)
+
+    showRules({
+        level = level,
+        mode = mode,
+        monsterRules = monsterRules,
+        playerRules = playerRules,
+    })
+end
+
+-- Dengar RemoteEvent (jalur utama)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_RulesActivated = Remotes:WaitForChild("RulesActivated")
+
+RE_RulesActivated.OnClientEvent:Connect(function(ruleIds)
+    tryShowFromRuleIds(ruleIds)
+end)
+
+-- Fallback via SessionInfo (jalur cadangan, jalan paralel)
+task.spawn(function()
+    task.wait(1) -- beri kesempatan RemoteEvent datang duluan kalau memang belum telat
+    local ruleIds = readRuleIdsFromSessionInfo()
+
+    if ruleIds then
+        tryShowFromRuleIds(ruleIds)
     end
 end)
