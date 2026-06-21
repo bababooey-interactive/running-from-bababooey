@@ -85,8 +85,8 @@ Constants.TILE_SIZE   = 8   -- lebar & kedalaman 1 tile (studs)
 Constants.WALL_HEIGHT = 8   -- tinggi wall (studs)
 
 -- Map scaling per level: cols/rows = BASE + (level - 1) * GROWTH, capped at MAX
-Constants.MAP_COLS_BASE          = 12
-Constants.MAP_ROWS_BASE          = 12
+Constants.MAP_COLS_BASE          = 16
+Constants.MAP_ROWS_BASE          = 16
 Constants.MAP_GROWTH_PER_LEVEL   = 2   -- tambah 2 tile per level tiap dimensi
 Constants.MAP_MAX_COLS           = 44
 Constants.MAP_MAX_ROWS           = 44
