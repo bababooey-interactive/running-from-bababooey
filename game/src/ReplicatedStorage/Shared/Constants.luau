@@ -80,7 +80,7 @@ Constants.NIGHTMARE_RULES = {
 -- ─────────────────────────────────────────────
 
 Constants.TILE_SIZE = 8 -- lebar & kedalaman 1 tile (studs)
-Constants.WALL_HEIGHT = 8 -- tinggi wall (studs)
+Constants.WALL_HEIGHT = 24 -- tinggi wall (studs)
 
 -- Map scaling per level: cols/rows = BASE + (level - 1) * GROWTH, capped at MAX
 Constants.MAP_COLS_BASE = 16

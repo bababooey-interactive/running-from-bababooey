@@ -47,11 +47,21 @@ local TILE_SIZE = Constants.TILE_SIZE -- 8 (BUKAN 16 lagi)
 -- Ukuran map & main hall di-resolve PER LEVEL, lihat resolveLevelConfig()
 -- di bawah. Tidak ada lagi MAP_WIDTH/MAP_HEIGHT konstan di top-level.
 
-local WALL_SCALE     = 5
-local WALL_Y_OFFSET  = Constants.WALL_HEIGHT / 2 -- mengikuti tinggi wall asli
+-- WALL_SCALE dihitung dari ukuran ASLI asset wall_straight
+-- (4.03 x 2.97 x 0.32 studs, dicek via GetBoundingBox), supaya lebar
+-- hasil scale PAS dengan TILE_SIZE (8 studs) -- tidak menjorok ke tile
+-- sebelah. Sebelumnya WALL_SCALE=5 dirancang untuk TILE_SIZE=16 lama,
+-- menyebabkan wall jadi 2.5x lebih lebar dari tile setelah migrasi ke
+-- TILE_SIZE=8, sehingga menutup celah akses ke labirin.
+-- Konsekuensi: tinggi wall jadi ~5.89 studs (bukan persis WALL_HEIGHT
+-- 8 studs), karena ScaleTo() itu uniform scale (X/Y/Z bareng). Ini
+-- prioritas yang disengaja -- wall TERLALU LEBAR jauh lebih berbahaya
+-- (blokir jalur) daripada wall sedikit lebih pendek dari ceiling.
+local WALL_SCALE     = TILE_SIZE / 4.034626007080078 -- ≈ 1.983
+local WALL_Y_OFFSET  = (2.969966411590576 * WALL_SCALE) / 2 -- setengah tinggi wall HASIL scale, bukan Constants.WALL_HEIGHT/2
 
 local CEILING_SCALE    = 4
-local CEILING_Y_OFFSET = Constants.WALL_HEIGHT + 4
+local CEILING_Y_OFFSET = Constants.WALL_HEIGHT - 8
 
 local PROP_SCALE      = 3
 local FIREPLACE_SCALE = 4
@@ -491,13 +501,41 @@ local function placeWall(mapFolder, col, row, dirName)
 		scale = WALL_SCALE
 	end
 
-	cloneAsset(
+	local wallClone = cloneAsset(
 		selectedWall,
 		mapFolder,
 		CFrame.new(wallPos) * CFrame.Angles(0, math.rad(dir.rotation), 0),
 		scale,
 		true
 	)
+	
+	-- Koreksi tinggi: ScaleTo() di atas bikin tinggi cuma ~5.89 stud
+	-- (lebar sudah pas TILE_SIZE, tapi tinggi ikut keskalakan sama rata).
+	-- Stretch ULANG cuma sumbu Y biar nyampe Constants.WALL_HEIGHT,
+	-- tanpa ubah lebar/ketebalan yang sudah pas.
+	if wallClone then
+		local currentCFrame, currentSize = wallClone:GetBoundingBox()
+		local currentHeight = currentSize.Y
+		local heightScaleFactor = Constants.WALL_HEIGHT / currentHeight
+	
+		-- ScaleTo() lagi tapi cuma pakai faktor TINGGI -- ini akan
+		-- ikut membesarkan X/Z juga (ScaleTo selalu uniform), jadi
+		-- TIDAK dipakai di sini. Sebagai gantinya, pakai pendekatan
+		-- resize manual per-Part (lebih rumit tapi presisi):
+	
+		for _, part in ipairs(wallClone:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local oldSize = part.Size
+				part.Size = Vector3.new(oldSize.X, oldSize.Y * heightScaleFactor, oldSize.Z)
+			end
+		end
+	
+		-- Setelah resize manual, posisi tiap part RELATIF terhadap pivot
+		-- model bisa sedikit bergeser (karena resize biasanya dari tengah
+		-- part itu sendiri, bukan dari pivot model). Re-pivot ke posisi
+		-- target supaya wall tetap presisi di tile-nya:
+		wallClone:PivotTo(CFrame.new(wallPos) * CFrame.Angles(0, math.rad(dir.rotation), 0))
+	end
 end
 
 local function placeDecorativeWallDetails(mapFolder, grid, col, row)
