@@ -57,7 +57,7 @@ local function runCloneAI(clone: Model, rules: { string })
 	local wanderTarget: Vector3? = nil
 
 	while clone.Parent ~= nil do
-		task.wait(0.05)
+		local dt = task.wait(0.05)
 
 		local pos = root.Position
 
@@ -106,11 +106,12 @@ local function runCloneAI(clone: Model, rules: { string })
 			if (pos - hrp.Position).Magnitude <= catchR then
 				-- Caught!
 				local hum2 = char:FindFirstChildOfClass("Humanoid")
-				if hum2 then
+				-- Health check
+				if hum2 and hum2.Health > 0 then
 					hum2.Health = 0
-				end
-				if RE_PlayerDied then
-					RE_PlayerDied:FireAllClients(target.Name)
+					if RE_PlayerDied then
+						RE_PlayerDied:FireAllClients(target.Name)
+					end
 				end
 				task.wait(2)
 				continue
@@ -122,7 +123,7 @@ local function runCloneAI(clone: Model, rules: { string })
 			local flatDist = flatDir.Magnitude
 
 			if flatDist > 0.5 then
-				local step = math.min(CLONE_SPEED * 0.05, flatDist)
+				local step = math.min(CLONE_SPEED * dt, flatDist)
 				local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
 
 				if flatDist > 0.001 then
@@ -150,7 +151,7 @@ local function runCloneAI(clone: Model, rules: { string })
 				local dir = wanderTarget - pos
 				local dist = Vector2.new(dir.X, dir.Z).Magnitude
 				if dist > 1 then
-					local step = math.min(5 * 0.05, dist)
+					local step = math.min(5 * dt, dist)
 					local newPos = Vector3.new(pos.X + dir.Unit.X * step, CLONE_Y, pos.Z + dir.Unit.Z * step)
 
 					if dist > 0.001 then

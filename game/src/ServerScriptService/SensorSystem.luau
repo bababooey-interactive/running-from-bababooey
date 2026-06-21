@@ -1,8 +1,8 @@
 -- =============================================================
---  SensorSystem.luau  (ModuleScript — Day 4-7, COMPLETE)
---  Day 7 additions: real vision raycast + IsPlayerInLight
+--  SensorSystem.luau
 -- =============================================================
 
+local CollectionService = game:GetService("CollectionService")
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
 local SensorSystem = {}
@@ -60,7 +60,7 @@ function SensorSystem.CheckHearing(monsterPos: Vector3, activeRules: { string })
 	return best
 end
 
--- ─── Smell (Day 7 — real implementation) ─────────────────────
+-- ─── Smell ─────────────────────
 
 function SensorSystem.CheckSmell(monsterPos: Vector3, players: { Player }, activeRules: { string }): Player?
 	if not table.find(activeRules, Constants.Rules.MONSTER_SMELL) then
@@ -86,14 +86,14 @@ function SensorSystem.CheckSmell(monsterPos: Vector3, players: { Player }, activ
 	return closest
 end
 
--- ─── Lit-area check (Day 7) ───────────────────────────────────
+-- ─── Lit-area check ───────────────────────────────────
 -- Player dianggap "in light" kalau dekat PointLight yang cukup terang,
 -- OR kalau global ambient sangat terang (game terlalu terang).
 
 function SensorSystem.IsPlayerInLight(position: Vector3): boolean
-	-- Cek semua PointLight aktif di workspace
-	for _, desc in ipairs(workspace:GetDescendants()) do
-		if not desc:IsA("PointLight") then
+	-- Instantly grab ONLY the objects tagged as MapLights
+	for _, desc in ipairs(CollectionService:GetTagged("MapLights")) do
+		if not desc:IsA("Light") then
 			continue
 		end
 		local parent = desc.Parent
@@ -103,19 +103,21 @@ function SensorSystem.IsPlayerInLight(position: Vector3): boolean
 		if not desc.Enabled or desc.Brightness < 0.3 then
 			continue
 		end
+
+		-- Use the light's range to calculate distance
 		local dist = (position - parent.Position).Magnitude
-		-- Player lit kalau dalam 65% dari range light
 		if dist < desc.Range * 0.65 then
 			return true
 		end
 	end
+
 	-- Fallback: cek ambient global (gelap = tidak lit)
 	local amb = game.Lighting.Ambient
 	local avgBrightness = (amb.R + amb.G + amb.B) / 3
 	return avgBrightness > 0.45
 end
 
--- ─── Vision (Day 7 — full raycast + lit area) ─────────────────
+-- ─── Vision ─────────────────
 
 function SensorSystem.CheckVision(
 	monster: Model,
