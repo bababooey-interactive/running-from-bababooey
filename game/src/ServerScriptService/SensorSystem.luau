@@ -139,9 +139,7 @@ function SensorSystem.CheckVision(
 	local forward = rootPart.CFrame.LookVector
 	local eyePos = monsterPos + Vector3.new(0, 1.5, 0) -- monster eye height
 
-	-- Raycast param: exclude monster model itself
 	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = { monster }
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 	for _, player in ipairs(players) do
@@ -165,17 +163,17 @@ function SensorSystem.CheckVision(
 			continue
 		end
 
-		-- ── 2. Occlusion raycast ──────────────────────────────
-		-- Cast from monster eye toward player head
+		-- ── 2. Occlusion raycast (WALL CHECK) ─────────────────
 		local playerHeadPos = hrp.Position + Vector3.new(0, 1.5, 0)
 		local rayDir = playerHeadPos - eyePos
 
-		-- Temporarily exclude player char from filter so ray CAN hit other things
-		local result = workspace:Raycast(eyePos, rayDir, rayParams)
+		-- Ignore BOTH the monster and the player.
+		-- If the ray hits anything now, it MUST be a wall/obstacle.
+		rayParams.FilterDescendantsInstances = { monster, char }
 
-		-- If ray hit something that is NOT the player → blocked
-		if result and not result.Instance:IsDescendantOf(char) then
-			continue
+		local blocked = workspace:Raycast(eyePos, rayDir, rayParams)
+		if blocked then
+			continue -- Wall detected!
 		end
 
 		-- ── 3. Player must be in lit area ─────────────────────
@@ -238,16 +236,29 @@ function SensorSystem.GetAwarenessForPlayer(
 	if table.find(activeRules, Constants.Rules.MONSTER_SEE) then
 		local rp = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("rb") or monster.PrimaryPart
 		if rp then
-			local dir = playerPos - monsterPos
+			local eyePos = monsterPos + Vector3.new(0, 1.5, 0)
+			local playerHeadPos = hrp.Position + Vector3.new(0, 1.5, 0)
+			local dir = playerHeadPos - eyePos
 			local dist = dir.Magnitude
+
 			if dist >= 0.1 and dist <= Constants.MONSTER_VISION_RANGE then
 				local cosA = rp.CFrame.LookVector:Dot(dir.Unit)
 				local half = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
+
 				if cosA >= half then
-					local inLight = SensorSystem.IsPlayerInLight(playerPos)
-					local contrib = inLight and (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA
-						or (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.2
-					awareness = math.max(awareness, contrib)
+					-- WALL CHECK for the Awareness UI
+					local rayParams = RaycastParams.new()
+					rayParams.FilterType = Enum.RaycastFilterType.Exclude
+					rayParams.FilterDescendantsInstances = { monster, char }
+
+					local blocked = workspace:Raycast(eyePos, dir, rayParams)
+
+					if not blocked then
+						local inLight = SensorSystem.IsPlayerInLight(playerPos)
+						local contrib = inLight and (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA
+							or (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.2
+						awareness = math.max(awareness, contrib)
+					end
 				end
 			end
 		end

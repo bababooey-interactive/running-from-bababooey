@@ -9,7 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SensorSystem = require(script.Parent.SensorSystem)
-local SoundManager = require(script.Parent.SoundManager)
+-- local SoundManager = require(script.Parent.SoundManager)
 local DuplicationSystem = require(script.Parent.DuplicationSystem)
 
 -- ── Remote Events ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ assert(rootPart, "[MonsterAI] SoulDragger needs a HumanoidRootPart or part named
 rootPart.Anchored = true
 monster.PrimaryPart = rootPart
 
-local sounds = SoundManager.new(monster)
+-- local sounds = SoundManager.new(monster)
 
 -- ── Constants ─────────────────────────────────────────────────
 -- TILE must equal MapGenerator's local TILE_SIZE (currently 16).
@@ -54,7 +54,7 @@ local TILE = 16
 -- How high the monster's pivot sits above the tile floor (Y=0 center).
 -- Tile floor is 1 stud thick → top at Y=0.5.
 -- Increase MONSTER_Y if the monster sinks, decrease if it floats.
-local MONSTER_Y = 3
+local MONSTER_Y = 0
 
 -- ── Animation ─────────────────────────────────────────────────
 local humanoid = monster:FindFirstChildOfClass("Humanoid")
@@ -190,14 +190,19 @@ local function beginChase(player: Player)
 	if chaseTarget ~= player then
 		chaseTarget = player
 		playMovement("Run")
+
 		if spotPlayedFor ~= player then
 			spotPlayedFor = player
-			playAction("Spotted")
+
+			-- Stagger the action animation slightly to prevent the Animator T-Pose glitch
+			task.spawn(function()
+				task.wait(0.05)
+				playAction("Spotted")
+			end)
 		end
 	end
 	lostTimer = LOST_TIME
 	state = "CHASE"
-	sounds:onStateChange("CHASE", true)
 end
 
 -- beginIdle ───────────────────────────────────────────────────
@@ -206,13 +211,87 @@ local function beginIdle()
 	chaseTarget = nil
 	idleTarget = nil
 	playMovement("Walk")
-	sounds:onStateChange("IDLE", false)
+	-- sounds:onStateChange("IDLE", false)
+end
+
+-- ── Tentacle Attack Visual ─────────────────────────────────────
+local function shootBlackTentacles(targetPos: Vector3, extendTime: number)
+	local limbs = {
+		monster:FindFirstChild("LeftHand", true)
+			or monster:FindFirstChild("Left Arm", true)
+			or monster:FindFirstChild("leftarm", true),
+
+		monster:FindFirstChild("RightHand", true)
+			or monster:FindFirstChild("Right Arm", true)
+			or monster:FindFirstChild("rightarm", true),
+	}
+
+	local activeTentacles = {}
+
+	for _, limb in ipairs(limbs) do
+		if not limb then
+			continue
+		end
+
+		local att0 = Instance.new("Attachment")
+		att0.Parent = limb
+
+		local endPart = Instance.new("Part")
+		endPart.Size = Vector3.new(0.1, 0.1, 0.1)
+		endPart.Transparency = 1
+		endPart.Anchored = true
+		endPart.CanCollide = false
+		-- Offset it slightly forward so it always shoots out, even if you are hugging the monster
+		endPart.Position = limb.Position + (rootPart.CFrame.LookVector * 1)
+		endPart.Parent = workspace
+
+		local att1 = Instance.new("Attachment")
+		att1.Parent = endPart
+
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = att0
+		beam.Attachment1 = att1
+		beam.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)) -- Pitch black!
+		beam.Transparency = NumberSequence.new(0) -- Completely solid, no see-through
+		beam.Width0 = 3.5 -- VERY thick at the monster's arm
+		beam.Width1 = 0.2 -- Sharp at the tip (creates the > shape)
+		beam.FaceCamera = true
+		beam.CurveSize0 = math.random(-4, 4)
+		beam.CurveSize1 = math.random(-4, 4)
+		beam.Parent = endPart
+
+		table.insert(activeTentacles, { part = endPart, limb = limb })
+
+		-- Shoot it out!
+		TweenService:Create(
+			endPart,
+			TweenInfo.new(extendTime, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+			{ Position = targetPos }
+		):Play()
+	end
+
+	-- Retract them
+	task.delay(extendTime + 0.8, function()
+		for _, t in ipairs(activeTentacles) do
+			if t.part and t.limb then
+				local retract = TweenService:Create(
+					t.part,
+					TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+					{ Position = t.limb.Position }
+				)
+				retract:Play()
+				retract.Completed:Once(function()
+					t.part:Destroy()
+				end)
+			end
+		end
+	end)
 end
 
 -- beginStrike: lunge → check hit window → catch or miss ───────
+-- beginStrike: lunge → check hit window → catch or miss ───────
 local function beginStrike(player: Player)
 	state = "CATCH"
-	sounds:onStateChange("CATCH", false)
 	playAction("Jumpscare")
 
 	local char = player.Character
@@ -222,28 +301,33 @@ local function beginStrike(player: Player)
 		return
 	end
 
-	-- Snapshot: where is the player RIGHT NOW when strike is decided?
+	-- Snapshot: The exact coordinate the monster is aiming the tentacles at!
 	local snapPos = hrp.Position
 	local monPos = rootPart.Position
 	local flatDir = Vector3.new(snapPos.X - monPos.X, 0, snapPos.Z - monPos.Z)
 	local flatDist = flatDir.Magnitude
 
-	-- Freeze player to look at monster
-	hrp.Anchored = true
-	hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(monPos.X, hrp.Position.Y, monPos.Z))
+	-- Force the MONSTER to look at the snapshot position
+	rootPart.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
 
-	-- Lunge tween: physically slide monster toward snapshot
-	local LUNGE_T = 0.3
+	-- The Travel Time. You have exactly 0.5 seconds to step out of the snapPos.
+	local STRIKE_TIME = 0.5
+
+	-- Lunge slightly toward the spot
 	if flatDist > 0.1 then
 		local lungePos = monPos + flatDir.Unit * math.max(0, flatDist - 1.5)
 		TweenService:Create(
 			rootPart,
-			TweenInfo.new(LUNGE_T, Enum.EasingStyle.Linear),
+			TweenInfo.new(STRIKE_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
 			{ CFrame = CFrame.lookAt(lungePos, lungePos + flatDir.Unit) }
 		):Play()
 	end
 
-	task.delay(LUNGE_T, function()
+	-- Shoot tentacles specifically at the player's chest height at the snapPos
+	shootBlackTentacles(snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
+
+	-- The Hit Check: Exactly when the tentacles reach the spot
+	task.delay(STRIKE_TIME, function()
 		if not player.Character then
 			beginIdle()
 			return
@@ -254,16 +338,13 @@ local function beginStrike(player: Player)
 			return
 		end
 
-		-- How big is the "you got caught" window?
-		local hitRadius = 3.5
-		if table.find(activeRules, Constants.Rules.MONSTER_REACH) then
-			hitRadius = 8.0 -- harder to dodge with long arms
-		end
+		-- ✨ THE FIX: A strict, tight impact hitbox.
+		-- It is just 2.5 studs wide. If you are not literally standing on the
+		-- exact spot the monster aimed at 0.5 seconds ago, the monster misses!
+		local IMPACT_HITBOX = 2.5
 
-		-- Did the player move out of the snapshot position in time?
-		if (liveHRP.Position - snapPos).Magnitude <= hitRadius then
-			-- ✅ Caught!
-			sounds:playHitSounds()
+		if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
+			-- ✅ Caught! You stood still or walked backwards into it.
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
 			if hum then
 				hum.Health = 0
@@ -271,8 +352,7 @@ local function beginStrike(player: Player)
 			RE.PlayerDied:FireAllClients(player.Name)
 			task.delay(2, beginIdle)
 		else
-			-- ❌ Missed — player dodged
-			liveHRP.Anchored = false
+			-- ❌ Missed! You successfully juked the monster.
 			task.delay(1.2, function()
 				if state == "CATCH" then
 					beginChase(player)
@@ -295,7 +375,15 @@ local function stepToward(target: Vector3, speed: number, dt: number): boolean
 
 	local step = math.min(speed * dt, dist)
 	local newPos = pivot.Position + dir.Unit * step
-	monster:PivotTo(CFrame.lookAt(newPos, newPos + dir.Unit))
+
+	-- FIX: Smooth Turning
+	local targetRotation = CFrame.lookAt(newPos, newPos + dir.Unit)
+	local turnSpeed = state == "CHASE" and 14 or 6 -- Turns fast while chasing, slow while idle
+
+	-- Lerp the rotation, but force the exact translation so it doesn't slide backward
+	local smoothedCFrame = pivot:Lerp(targetRotation, dt * turnSpeed)
+	monster:PivotTo(CFrame.new(newPos) * smoothedCFrame.Rotation)
+
 	return false
 end
 
@@ -315,13 +403,12 @@ end
 -- Welds a claw-extension part below each arm so they look longer.
 -- Only runs when MONSTER_REACH rule is active.
 
+-- ── MONSTER_REACH: Arm Extension ─────────────────────────────
 local function applyReachVisual()
 	if not table.find(activeRules, Constants.Rules.MONSTER_REACH) then
 		return
 	end
 
-	-- SoulDragger uses lowercase: "leftarm", "rightarm"
-	-- R6 / R15 fallbacks included in case the rig differs
 	local limbNames = {
 		"leftarm",
 		"rightarm",
@@ -332,31 +419,30 @@ local function applyReachVisual()
 	}
 
 	for _, name in ipairs(limbNames) do
-		local limb = monster:FindFirstChild(name, true) -- true = recursive
+		local limb = monster:FindFirstChild(name, true)
 		if not limb or not limb:IsA("BasePart") then
 			continue
 		end
-		if limb:FindFirstChild("ReachExtension") then
+		if limb:FindFirstChild("ReachAura") then
 			continue
-		end -- already done
+		end
 
-		local ext = Instance.new("Part")
-		ext.Name = "ReachExtension"
-		ext.Size = Vector3.new(limb.Size.X * 0.75, 3.5, limb.Size.Z * 0.75)
-		ext.Color = limb.Color
-		ext.Material = limb.Material
-		ext.Transparency = 0
-		ext.CanCollide = false
-		ext.CanQuery = false
-		ext.Massless = true
-		-- Hang below the hand center
-		ext.CFrame = limb.CFrame * CFrame.new(0, -(limb.Size.Y / 2 + ext.Size.Y / 2), 0)
-
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = limb
-		weld.Part1 = ext
-		weld.Parent = ext
-		ext.Parent = monster
+		-- Create a thick, dark blood-blob aura
+		local particles = Instance.new("ParticleEmitter")
+		particles.Name = "ReachAura"
+		particles.Color = ColorSequence.new(Color3.fromRGB(110, 10, 10)) -- Darker crimson blood red
+		particles.LightEmission = 0.15 -- Barely glows, looks more physical/blobby
+		particles.ZOffset = 0.5
+		-- Much thicker size to look like a mass
+		particles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 3.5), NumberSequenceKeypoint.new(1, 0.5) })
+		-- Make the center of the blob highly opaque
+		particles.Transparency =
+			NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) })
+		particles.Texture = "rbxassetid://8006210660"
+		particles.Lifetime = NumberRange.new(0.6, 1.2)
+		particles.Rate = 60 -- Spam a bit more to keep it thick
+		particles.Speed = NumberRange.new(0.5, 1.5) -- Slow down the speed so it clumps around the hand
+		particles.Parent = limb
 	end
 end
 
@@ -457,7 +543,10 @@ RunService.Heartbeat:Connect(function(dt)
 			catchR += Constants.MONSTER_REACH_BONUS
 		end
 
-		if (monPos - hrp.Position).Magnitude <= catchR then
+		local flatMonPos = Vector3.new(monPos.X, 0, monPos.Z)
+		local flatPlayerPos = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
+
+		if (flatMonPos - flatPlayerPos).Magnitude <= catchR then
 			beginStrike(chaseTarget)
 			return
 		end
@@ -494,10 +583,10 @@ end
 -- ── TEST rules (remove / comment out once Gilang's system is wired) ──
 activeRules = {
 	Constants.Rules.MONSTER_HEAR,
-	-- Constants.Rules.MONSTER_SMELL,
-	-- Constants.Rules.MONSTER_SEE,
-	-- Constants.Rules.MONSTER_REACH,
-	-- Constants.Rules.MONSTER_DUPLICATE,
+	Constants.Rules.MONSTER_SMELL,
+	Constants.Rules.MONSTER_SEE,
+	Constants.Rules.MONSTER_REACH,
+	Constants.Rules.MONSTER_DUPLICATE,
 }
 applyReachVisual()
 

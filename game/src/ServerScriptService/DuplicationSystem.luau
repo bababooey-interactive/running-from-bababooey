@@ -4,7 +4,7 @@
 --  Each clone runs its own simple AI coroutine.
 --  Exponential: 1 rule = 2 monsters, 2 rules = 4, capped at 4.
 -- =============================================================
-
+local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
@@ -13,7 +13,7 @@ local DuplicationSystem = {}
 -- ── Config ────────────────────────────────────────────────────
 local MAX_TOTAL = 8 -- including original (so max 3 clones)
 local CLONE_SPEED = 13 -- studs/s
-local CLONE_Y = 3 -- must match MonsterAI's MONSTER_Y
+local CLONE_Y = 0 -- must match MonsterAI's MONSTER_Y
 -- local TILE = 16 -- must match MapGenerator's TILE_SIZE
 
 local activeClones: { Model } = {}
@@ -37,7 +37,7 @@ local function runCloneAI(clone: Model, rules: { string })
 	local hum = clone:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
 
-	local walkTrack, runTrack
+	local walkTrack, runTrack, spottedTrack, jumpscareTrack
 	if animator then
 		local walkAnim = Instance.new("Animation")
 		walkAnim.AnimationId = "rbxassetid://90825719838414"
@@ -51,13 +51,25 @@ local function runCloneAI(clone: Model, rules: { string })
 		runTrack = animator:LoadAnimation(runAnim)
 		runTrack.Priority = Enum.AnimationPriority.Movement
 		runTrack.Looped = true
+
+		-- Load Action Animations
+		local spottedAnim = Instance.new("Animation")
+		spottedAnim.AnimationId = "rbxassetid://91571146490557"
+		spottedTrack = animator:LoadAnimation(spottedAnim)
+		spottedTrack.Priority = Enum.AnimationPriority.Action
+
+		local jumpAnim = Instance.new("Animation")
+		jumpAnim.AnimationId = "rbxassetid://79583022426609"
+		jumpscareTrack = animator:LoadAnimation(jumpAnim)
+		jumpscareTrack.Priority = Enum.AnimationPriority.Action
 	end
 
 	local idleTimer = 0
 	local wanderTarget: Vector3? = nil
+	local lastTarget: Player? = nil -- ADD THIS to remember who we spotted
 
 	while clone.Parent ~= nil do
-		local dt = task.wait(0.05)
+		local dt = RunService.Heartbeat:Wait()
 
 		local pos = root.Position
 
@@ -82,6 +94,12 @@ local function runCloneAI(clone: Model, rules: { string })
 		end
 
 		if target then
+			if target ~= lastTarget then
+				lastTarget = target
+				if spottedTrack then
+					spottedTrack:Play(0.1)
+				end
+			end
 			if walkTrack and walkTrack.IsPlaying then
 				walkTrack:Stop(0.2)
 			end
@@ -105,6 +123,9 @@ local function runCloneAI(clone: Model, rules: { string })
 
 			if (pos - hrp.Position).Magnitude <= catchR then
 				-- Caught!
+				if jumpscareTrack then
+					jumpscareTrack:Play()
+				end
 				local hum2 = char:FindFirstChildOfClass("Humanoid")
 				-- Health check
 				if hum2 and hum2.Health > 0 then
@@ -133,6 +154,7 @@ local function runCloneAI(clone: Model, rules: { string })
 				end
 			end
 		else
+			lastTarget = nil
 			if runTrack and runTrack.IsPlaying then
 				runTrack:Stop(0.2)
 			end
@@ -149,13 +171,15 @@ local function runCloneAI(clone: Model, rules: { string })
 			end
 			if wanderTarget then
 				local dir = wanderTarget - pos
-				local dist = Vector2.new(dir.X, dir.Z).Magnitude
+				local flatDir = Vector3.new(dir.X, 0, dir.Z) -- FIX: Flatten the direction!
+				local dist = flatDir.Magnitude
+
 				if dist > 1 then
 					local step = math.min(5 * dt, dist)
-					local newPos = Vector3.new(pos.X + dir.Unit.X * step, CLONE_Y, pos.Z + dir.Unit.Z * step)
+					local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
 
 					if dist > 0.001 then
-						clone:PivotTo(CFrame.lookAt(newPos, newPos + dir.Unit))
+						clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
 					else
 						clone:PivotTo(CFrame.new(newPos))
 					end
