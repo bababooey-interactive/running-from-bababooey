@@ -170,99 +170,6 @@ local function spawnAtArc(playerSpawnWorld: Vector3, radiusTiles: number)
 	warn("[MonsterAI] Arc spawn failed — used fallback")
 end
 
--- ── A* Pathfinding ────────────────────────────────────────────
-
-local DIRS = {
-	{ 0, 1, 1 },
-	{ 0, -1, 1 },
-	{ 1, 0, 1 },
-	{ -1, 0, 1 },
-	{ 1, 1, 1.414 },
-	{ 1, -1, 1.414 },
-	{ -1, 1, 1.414 },
-	{ -1, -1, 1.414 },
-}
-
-local function aStar(sC: number, sR: number, gC: number, gR: number): { { col: number, row: number } }?
-	if not gridReady then
-		return nil
-	end
-
-	local function key(c, r)
-		return r * 10000 + c
-	end
-	local function h(c, r)
-		return math.sqrt((c - gC) ^ 2 + (r - gR) ^ 2)
-	end
-
-	local open: { { col: number, row: number, f: number } } = {}
-	local closed: { [number]: boolean } = {}
-	local gScore: { [number]: number } = {}
-	local parent: { [number]: number } = {}
-
-	local sk = key(sC, sR)
-	gScore[sk] = 0
-	table.insert(open, { col = sC, row = sR, f = h(sC, sR) })
-
-	for _ = 1, 900 do
-		if #open == 0 then
-			break
-		end
-		local bi = 1
-		for i = 2, #open do
-			if open[i].f < open[bi].f then
-				bi = i
-			end
-		end
-		local cur = open[bi]
-		table.remove(open, bi)
-		local ck = key(cur.col, cur.row)
-		if closed[ck] then
-			continue
-		end
-		closed[ck] = true
-
-		if cur.col == gC and cur.row == gR then
-			local path: { { col: number, row: number } } = {}
-			local k = ck
-			while k ~= sk do
-				local r = math.floor(k / 10000)
-				local c = k - r * 10000
-				table.insert(path, 1, { col = c, row = r })
-				k = parent[k]
-			end
-			return path
-		end
-
-		local cg = gScore[ck] or 0
-		for _, d in ipairs(DIRS) do
-			local nc, nr = cur.col + d[1], cur.row + d[2]
-			local nk = key(nc, nr)
-			if closed[nk] or not isTileWalkable(nc, nr) then
-				continue
-			end
-			local tg = cg + d[3]
-			if not gScore[nk] or tg < gScore[nk] then
-				gScore[nk] = tg
-				parent[nk] = ck
-				local f = tg + h(nc, nr)
-				local found = false
-				for _, nd in ipairs(open) do
-					if nd.col == nc and nd.row == nr then
-						nd.f = f
-						found = true
-						break
-					end
-				end
-				if not found then
-					table.insert(open, { col = nc, row = nr, f = f })
-				end
-			end
-		end
-	end
-	return nil
-end
-
 -- ── State Machine ─────────────────────────────────────────────
 
 type MonsterState = "IDLE" | "CHASE" | "CATCH"
@@ -270,14 +177,11 @@ type MonsterState = "IDLE" | "CHASE" | "CATCH"
 local state: MonsterState = "IDLE"
 local activeRules: { string } = {}
 local chaseTarget: Player? = nil
-local currentPath: { { col: number, row: number } }? = nil
-local waypointIdx = 1
-local pathCD = 0
+
 local lostTimer = 0
 local idleTarget: Vector3? = nil
 local spotPlayedFor: Player? = nil
 
-local PATH_INTERVAL = 1.2
 local LOST_TIME = 5
 local IDLE_RANGE = 5 -- tiles
 
@@ -285,8 +189,6 @@ local IDLE_RANGE = 5 -- tiles
 local function beginChase(player: Player)
 	if chaseTarget ~= player then
 		chaseTarget = player
-		currentPath = nil
-		waypointIdx = 1
 		playMovement("Run")
 		if spotPlayedFor ~= player then
 			spotPlayedFor = player
@@ -302,7 +204,6 @@ end
 local function beginIdle()
 	state = "IDLE"
 	chaseTarget = nil
-	currentPath = nil
 	idleTarget = nil
 	playMovement("Walk")
 	sounds:onStateChange("IDLE", false)
@@ -472,7 +373,6 @@ RunService.Heartbeat:Connect(function(dt)
 
 	sensorCD += dt
 	broadcastCD = math.max(0, broadcastCD - dt)
-	pathCD = math.max(0, pathCD - dt)
 
 	local monPos = rootPart.Position
 
@@ -562,24 +462,8 @@ RunService.Heartbeat:Connect(function(dt)
 			return
 		end
 
-		if pathCD <= 0 or not currentPath then
-			pathCD = PATH_INTERVAL
-			local mC, mR = worldToTile(monPos)
-			local pC, pR = worldToTile(hrp.Position)
-			currentPath = aStar(mC, mR, pC, pR) or { { col = pC, row = pR } }
-			waypointIdx = 1
-		end
-
-		if currentPath and waypointIdx <= #currentPath then
-			local wp = currentPath[waypointIdx]
-			local wpW = tileToWorld(wp.col, wp.row)
-			if stepToward(wpW, speed, dt) then
-				waypointIdx += 1
-				if waypointIdx > #currentPath then
-					pathCD = 0
-				end
-			end
-		end
+		-- Noclip straight to the player
+		stepToward(hrp.Position, speed, dt)
 
 		playMovement("Run")
 	end
