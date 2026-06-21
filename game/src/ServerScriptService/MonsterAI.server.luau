@@ -1,26 +1,18 @@
 -- =============================================================
---  MonsterAI.server.luau  (ServerScript — Day 4-6)
---  A* pathfinding, state machine (IDLE/CHASE/CATCH),
---  noclip CFrame movement, animation control, hearing
---
---  Day 7 adds: smell system, vision raycast
+--  MonsterAI.server.luau
 -- =============================================================
--- anim:
--- monster_run: 75452347275172
--- monster_jumpscare: 79583022426609
--- monster_walk: 90825719838414
--- monster_spotted: 91571146490557
 
--- ── SERVICES ──────────────────────────────────────────────────
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- ── DEPENDENCIES ──────────────────────────────────────────────
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SensorSystem = require(script.Parent.SensorSystem)
+local SoundManager = require(script.Parent.SoundManager)
+local DuplicationSystem = require(script.Parent.DuplicationSystem)
 
+-- ── Remote Events ─────────────────────────────────────────────
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE = {
 	PlayerMakeNoise = Remotes:WaitForChild("PlayerMakeNoise"),
@@ -28,59 +20,64 @@ local RE = {
 	MonsterPosition = Remotes:WaitForChild("MonsterPosition"),
 	AwarenessUpdated = Remotes:WaitForChild("AwarenessUpdated"),
 }
+DuplicationSystem.init(RE.PlayerDied)
 
--- ── MONSTER SETUP ─────────────────────────────────────────────
-local MONSTER_NAME = "SoulDragger"
-local monster = workspace:WaitForChild(MONSTER_NAME)
+-- ── Monster Setup ─────────────────────────────────────────────
+-- OPTION A (current): monster pre-placed in Workspace
+local monster = workspace:WaitForChild("SoulDragger")
 
--- Set noclip on every BasePart
+-- OPTION B (recommended after reorganization):
+-- local monster = game:GetService("ServerStorage")
+--     :WaitForChild("Characters"):WaitForChild("SoulDragger"):Clone()
+-- monster.Parent = workspace
+
 for _, part in ipairs(monster:GetDescendants()) do
 	if part:IsA("BasePart") then
 		part.CanCollide = false
-		part.CanQuery = false -- jangan kena raycast accidental
+		part.CanQuery = false
 		part.Anchored = false
 	end
 end
 
--- Primary part untuk PivotTo
-local rootPart = monster:FindFirstChild("rb") or monster.PrimaryPart
+local rootPart = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("rb") or monster.PrimaryPart
+assert(rootPart, "[MonsterAI] SoulDragger needs a HumanoidRootPart or part named 'rb'")
 rootPart.Anchored = true
-assert(rootPart, "SoulDragger must have part named 'rb'")
 monster.PrimaryPart = rootPart
 
--- ── ANIMATION CONTROLLER ──────────────────────────────────────
-local humanoid = monster:FindFirstChildOfClass("Humanoid")
-local animator: Animator
+local sounds = SoundManager.new(monster)
 
+-- ── Constants ─────────────────────────────────────────────────
+-- TILE must equal MapGenerator's local TILE_SIZE (currently 16).
+-- If Gilang changes his TILE_SIZE value, update this to match.
+local TILE = 16
+
+-- How high the monster's pivot sits above the tile floor (Y=0 center).
+-- Tile floor is 1 stud thick → top at Y=0.5.
+-- Increase MONSTER_Y if the monster sinks, decrease if it floats.
+local MONSTER_Y = 3
+
+-- ── Animation ─────────────────────────────────────────────────
+local humanoid = monster:FindFirstChildOfClass("Humanoid")
+local animator: Animator?
 if humanoid then
 	animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
 end
 
--- Create and load tracks directly from your published IDs
 local tracks: { [string]: AnimationTrack } = {}
-
-local animationIDs = {
-	Run = "rbxassetid://75452347275172",
-	Jumpscare = "rbxassetid://79583022426609",
+local animIDs = {
 	Walk = "rbxassetid://90825719838414",
+	Run = "rbxassetid://75452347275172",
 	Spotted = "rbxassetid://91571146490557",
+	Jumpscare = "rbxassetid://79583022426609",
 }
-
 if animator then
-	for animName, animID in pairs(animationIDs) do
-		local animObj = Instance.new("Animation")
-		animObj.AnimationId = animID
-
-		local track = animator:LoadAnimation(animObj)
-
-		-- FIX: Assign priorities so animations blend perfectly without T-posing
-		if animName == "Spotted" or animName == "Jumpscare" then
-			track.Priority = Enum.AnimationPriority.Action
-		else
-			track.Priority = Enum.AnimationPriority.Movement
-		end
-
-		tracks[animName] = track
+	for name, id in pairs(animIDs) do
+		local anim = Instance.new("Animation")
+		anim.AnimationId = id
+		local track = animator:LoadAnimation(anim)
+		track.Priority = (name == "Spotted" or name == "Jumpscare") and Enum.AnimationPriority.Action
+			or Enum.AnimationPriority.Movement
+		tracks[name] = track
 	end
 end
 
@@ -91,14 +88,11 @@ local function playMovement(name: string)
 		return
 	end
 	currentMovement = name
-
-	-- Stop all other MOVEMENT animations
-	for tName, track in pairs(tracks) do
-		if track.Priority == Enum.AnimationPriority.Movement and tName ~= name then
-			track:Stop(0.2)
+	for n, t in pairs(tracks) do
+		if t.Priority == Enum.AnimationPriority.Movement and n ~= name and t.IsPlaying then
+			t:Stop(0.2)
 		end
 	end
-
 	if tracks[name] then
 		tracks[name].Looped = true
 		tracks[name]:Play(0.2)
@@ -106,31 +100,41 @@ local function playMovement(name: string)
 end
 
 local function playAction(name: string)
-	-- Stop all other ACTION animations
-	for tName, track in pairs(tracks) do
-		if track.Priority == Enum.AnimationPriority.Action then
-			track:Stop(0.1)
+	for _, t in pairs(tracks) do
+		if t.Priority == Enum.AnimationPriority.Action and t.IsPlaying then
+			t:Stop(0.1)
 		end
 	end
-
 	if tracks[name] then
 		tracks[name].Looped = false
 		tracks[name]:Play(0.1)
 	end
 end
 
--- ── MAP GRID & SPAWN INTEGRATION ──────────────────────────────
+-- ── Grid & Tile Helpers ───────────────────────────────────────
+--
+-- Coordinate system MATCHES MapGenerator.server.luau:
+--   gridToWorld(col, row)  =  Vector3( (col-1)*16,  0, (row-1)*16 )
+--   so  col=1,row=1  →  world (0,  0, 0)
+--       col=2,row=3  →  world (16, 0, 32)
+--
+-- Round-trip check:
+--   tileToWorld(2,3)  =  (16, Y, 32)
+--   worldToTile(16,Y,32)  =  round(16/16)+1, round(32/16)+1  =  2, 3  ✓
+
 local grid: { { number } } = {}
 local gridReady = false
 
-local TILE = Constants.TILE_SIZE
-
-local function worldToTile(pos: Vector3): (number, number)
-	return math.clamp(math.round(pos.X / TILE), 1, #(grid[1] or { 1 })), math.clamp(math.round(pos.Z / TILE), 1, #grid)
+local function tileToWorld(col: number, row: number): Vector3
+	return Vector3.new((col - 1) * TILE, MONSTER_Y, (row - 1) * TILE)
 end
 
-local function tileToWorld(col: number, row: number): Vector3
-	return Vector3.new((col - 1) * TILE, rootPart.Position.Y, (row - 1) * TILE)
+local function worldToTile(pos: Vector3): (number, number)
+	local COLS = grid[1] and #grid[1] or 15
+	local ROWS = #grid > 0 and #grid or 18
+	local col = math.clamp(math.round(pos.X / TILE) + 1, 1, COLS)
+	local row = math.clamp(math.round(pos.Z / TILE) + 1, 1, ROWS)
+	return col, row
 end
 
 local function isTileWalkable(col: number, row: number): boolean
@@ -138,118 +142,92 @@ local function isTileWalkable(col: number, row: number): boolean
 		return false
 	end
 	local t = grid[row][col]
-	return t ~= nil and t ~= Constants.Tile.WALL
+	return t ~= nil and t ~= 0 -- 0 = WALL; everything else is walkable
 end
 
--- ── SPAWN LOGIC ───────────────────────────────────────────────
-local function spawnMonsterInArc(spawnWorldPos: Vector3, radiusTiles: number)
-	local tries = 0
-	local centerCol, centerRow = worldToTile(spawnWorldPos)
+-- ── Spawn in Arc ──────────────────────────────────────────────
 
-	repeat
-		tries += 1
-		-- Random angle for the "arc" (e.g., between 0 and 180 degrees)
-		local angle = math.rad(math.random(0, 180))
+local function spawnAtArc(playerSpawnWorld: Vector3, radiusTiles: number)
+	local COLS = grid[1] and #grid[1] or 15
+	local ROWS = #grid > 0 and #grid or 18
+	local cCol = math.round(playerSpawnWorld.X / TILE) + 1
+	local cRow = math.round(playerSpawnWorld.Z / TILE) + 1
 
-		-- Calculate grid offset using sine/cosine
-		local dCol = math.round(math.cos(angle) * radiusTiles)
-		local dRow = math.round(math.sin(angle) * radiusTiles)
-
-		local targetCol = centerCol + dCol
-		local targetRow = centerRow + dRow
-
-		-- BOUNDARY CHECK: Only spawn if the tile is strictly walkable
-		if isTileWalkable(targetCol, targetRow) then
-			local spawnPoint = tileToWorld(targetCol, targetRow)
-			monster:PivotTo(CFrame.new(spawnPoint + Vector3.new(0, 3, 0)))
+	for _ = 1, 60 do
+		local angle = math.rad(math.random(0, 359))
+		local r = radiusTiles + math.random(-2, 2)
+		local col = math.clamp(math.round(cCol + math.cos(angle) * r), 1, COLS)
+		local row = math.clamp(math.round(cRow + math.sin(angle) * r), 1, ROWS)
+		if isTileWalkable(col, row) then
+			monster:PivotTo(CFrame.new(tileToWorld(col, row)))
+			print(("[MonsterAI] Spawned at tile (%d,%d)"):format(col, row))
 			return
 		end
-	until tries > 50
-
-	-- Fallback if arc fails: Just put it on the closest walkable tile
-	monster:PivotTo(CFrame.new(tileToWorld(centerCol, centerRow) + Vector3.new(0, 3, 0)))
-end
-
-local TILE = Constants.TILE_SIZE
-local function worldToTile(pos: Vector3): (number, number)
-	return math.clamp(math.round(pos.X / TILE), 1, #(grid[1] or { 1 })), math.clamp(math.round(pos.Z / TILE), 1, #grid)
-end
-local function tileToWorld(col: number, row: number): Vector3
-	return Vector3.new(col * TILE, rootPart.Position.Y, row * TILE)
-end
-local function isTileWalkable(col: number, row: number): boolean
-	if not grid[row] then
-		return false
 	end
-	local t = grid[row][col]
-	return t ~= nil and t ~= Constants.Tile.WALL
+	-- Fallback: opposite side of spawn
+	local fb = Vector3.new(playerSpawnWorld.X + radiusTiles * TILE, MONSTER_Y, playerSpawnWorld.Z)
+	monster:PivotTo(CFrame.new(fb))
+	warn("[MonsterAI] Arc spawn failed — used fallback")
 end
 
--- ── A* PATHFINDING ────────────────────────────────────────────
--- 8-directional movement. Diagonal cost = √2 ≈ 1.414.
--- Monster adalah noclip → kalau A* gagal, fallback ke direct path.
+-- ── A* Pathfinding ────────────────────────────────────────────
 
 local DIRS = {
 	{ 0, 1, 1 },
 	{ 0, -1, 1 },
 	{ 1, 0, 1 },
-	{ -1, 0, 1 }, -- cardinal  cost 1
+	{ -1, 0, 1 },
 	{ 1, 1, 1.414 },
 	{ 1, -1, 1.414 },
 	{ -1, 1, 1.414 },
-	{ -1, -1, 1.414 }, -- diagonal cost √2
+	{ -1, -1, 1.414 },
 }
 
-local function aStar(sCol: number, sRow: number, gCol: number, gRow: number): { { col: number, row: number } }?
+local function aStar(sC: number, sR: number, gC: number, gR: number): { { col: number, row: number } }?
 	if not gridReady then
 		return nil
 	end
 
 	local function key(c, r)
-		return r * 1000 + c
+		return r * 10000 + c
 	end
 	local function h(c, r)
-		return math.sqrt((c - gCol) ^ 2 + (r - gRow) ^ 2)
+		return math.sqrt((c - gC) ^ 2 + (r - gR) ^ 2)
 	end
 
 	local open: { { col: number, row: number, f: number } } = {}
 	local closed: { [number]: boolean } = {}
 	local gScore: { [number]: number } = {}
-	local parent: { [number]: number } = {} -- key → parent key
+	local parent: { [number]: number } = {}
 
-	local sk = key(sCol, sRow)
+	local sk = key(sC, sR)
 	gScore[sk] = 0
-	table.insert(open, { col = sCol, row = sRow, f = h(sCol, sRow) })
+	table.insert(open, { col = sC, row = sR, f = h(sC, sR) })
 
-	local MAX_ITER = 800 -- batas iterasi agar tidak freeze saat grid besar
-	local iter = 0
-
-	while #open > 0 and iter < MAX_ITER do
-		iter += 1
-
-		-- Pop node dengan f terkecil
-		local bestIdx = 1
+	for _ = 1, 900 do
+		if #open == 0 then
+			break
+		end
+		local bi = 1
 		for i = 2, #open do
-			if open[i].f < open[bestIdx].f then
-				bestIdx = i
+			if open[i].f < open[bi].f then
+				bi = i
 			end
 		end
-		local cur = open[bestIdx]
-		table.remove(open, bestIdx)
-
+		local cur = open[bi]
+		table.remove(open, bi)
 		local ck = key(cur.col, cur.row)
 		if closed[ck] then
 			continue
 		end
 		closed[ck] = true
 
-		-- Goal reached → reconstruct
-		if cur.col == gCol and cur.row == gRow then
+		if cur.col == gC and cur.row == gR then
 			local path: { { col: number, row: number } } = {}
 			local k = ck
 			while k ~= sk do
-				local r = math.floor(k / 1000)
-				local c = k - r * 1000
+				local r = math.floor(k / 10000)
+				local c = k - r * 10000
 				table.insert(path, 1, { col = c, row = r })
 				k = parent[k]
 			end
@@ -257,28 +235,21 @@ local function aStar(sCol: number, sRow: number, gCol: number, gRow: number): { 
 		end
 
 		local cg = gScore[ck] or 0
-
 		for _, d in ipairs(DIRS) do
 			local nc, nr = cur.col + d[1], cur.row + d[2]
 			local nk = key(nc, nr)
-			if closed[nk] then
+			if closed[nk] or not isTileWalkable(nc, nr) then
 				continue
 			end
-			-- Monster noclip: pakai walkable tiles tapi kalau mau bisa remove check ini
-			if not isTileWalkable(nc, nr) then
-				continue
-			end
-
 			local tg = cg + d[3]
 			if not gScore[nk] or tg < gScore[nk] then
 				gScore[nk] = tg
 				parent[nk] = ck
 				local f = tg + h(nc, nr)
-				-- Update or add ke open
 				local found = false
-				for _, node in ipairs(open) do
-					if node.col == nc and node.row == nr then
-						node.f = f
+				for _, nd in ipairs(open) do
+					if nd.col == nc and nd.row == nr then
+						nd.f = f
 						found = true
 						break
 					end
@@ -289,144 +260,119 @@ local function aStar(sCol: number, sRow: number, gCol: number, gRow: number): { 
 			end
 		end
 	end
-
-	return nil -- no path → caller akan direct-move
+	return nil
 end
 
--- ── STATE MACHINE ─────────────────────────────────────────────
+-- ── State Machine ─────────────────────────────────────────────
 
 type MonsterState = "IDLE" | "CHASE" | "CATCH"
 
 local state: MonsterState = "IDLE"
-local activeRules: { string } = {} -- diisi dari RulesActivated
-
--- CHASE state
+local activeRules: { string } = {}
 local chaseTarget: Player? = nil
 local currentPath: { { col: number, row: number } }? = nil
-local waypointIndex = 1
-local pathUpdateCD = 0 -- countdown detik sebelum re-run A*
-local PATH_INTERVAL = 1.2 -- detik antar path recalc
-
--- IDLE state
+local waypointIdx = 1
+local pathCD = 0
+local lostTimer = 0
 local idleTarget: Vector3? = nil
-local IDLE_RANGE = 6 -- tile radius wander
-local lostTimer = 0 -- detik sejak terakhir detect player
-local LOST_TIME = 5 -- detik sampai monster berhenti chase
-
--- ─── Transisi ke CHASE ───────────────────────────────────────
 local spotPlayedFor: Player? = nil
 
-local spotPlayedFor: Player? = nil
+local PATH_INTERVAL = 1.2
+local LOST_TIME = 5
+local IDLE_RANGE = 5 -- tiles
 
+-- beginChase ──────────────────────────────────────────────────
 local function beginChase(player: Player)
 	if chaseTarget ~= player then
 		chaseTarget = player
 		currentPath = nil
-		waypointIndex = 1
-
-		-- 🔧 FIX: Start running underneath immediately!
+		waypointIdx = 1
 		playMovement("Run")
-
 		if spotPlayedFor ~= player then
 			spotPlayedFor = player
-			-- Plays OVER the run animation instantly
 			playAction("Spotted")
 		end
 	end
 	lostTimer = LOST_TIME
 	state = "CHASE"
+	sounds:onStateChange("CHASE", true)
 end
 
+-- beginIdle ───────────────────────────────────────────────────
 local function beginIdle()
 	state = "IDLE"
 	chaseTarget = nil
 	currentPath = nil
 	idleTarget = nil
 	playMovement("Walk")
+	sounds:onStateChange("IDLE", false)
 end
 
--- ─── Transisi ke STRIKE / CATCH ───────────────────────────────
+-- beginStrike: lunge → check hit window → catch or miss ───────
 local function beginStrike(player: Player)
 	state = "CATCH"
-	playAction("Jumpscare") -- Plays OVER movement
+	sounds:onStateChange("CATCH", false)
+	playAction("Jumpscare")
 
 	local char = player.Character
-	if not char then
-		beginIdle()
-		return
-	end
-	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then
-		beginIdle()
+		task.delay(2, beginIdle)
 		return
 	end
 
-	-- 1. Lock the target's position
-	local strikeTargetPos = hrp.Position
-	local lookPos = Vector3.new(strikeTargetPos.X, rootPart.Position.Y, strikeTargetPos.Z)
+	-- Snapshot: where is the player RIGHT NOW when strike is decided?
+	local snapPos = hrp.Position
+	local monPos = rootPart.Position
+	local flatDir = Vector3.new(snapPos.X - monPos.X, 0, snapPos.Z - monPos.Z)
+	local flatDist = flatDir.Magnitude
 
-	local STRIKE_SPEED = 0.35
+	-- Freeze player to look at monster
+	hrp.Anchored = true
+	hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(monPos.X, hrp.Position.Y, monPos.Z))
 
-	-- 🔧 LUNGE MECHANIC FIX: Prevent NaN crash and physically slide to target
-	local dir = (lookPos - rootPart.Position)
-	local distance = dir.Magnitude
-	local lungeCFrame
-
-	if distance > 0.1 then
-		-- Dash towards the player, but stay 1.5 studs back to prevent clipping into them
-		local lungePos = rootPart.Position + dir.Unit * math.max(0, distance - 1.5)
-		lungeCFrame = CFrame.lookAt(lungePos, lookPos)
-	else
-		-- Monster is already literally on top of the player
-		lungeCFrame = rootPart.CFrame
+	-- Lunge tween: physically slide monster toward snapshot
+	local LUNGE_T = 0.3
+	if flatDist > 0.1 then
+		local lungePos = monPos + flatDir.Unit * math.max(0, flatDist - 1.5)
+		TweenService:Create(
+			rootPart,
+			TweenInfo.new(LUNGE_T, Enum.EasingStyle.Linear),
+			{ CFrame = CFrame.lookAt(lungePos, lungePos + flatDir.Unit) }
+		):Play()
 	end
 
-	-- Physically move the monster's body during the strike!
-	local lungeTween = TweenService:Create(
-		rootPart,
-		TweenInfo.new(STRIKE_SPEED, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
-		{ CFrame = lungeCFrame }
-	)
-	lungeTween:Play()
-
-	-- 2. Fast delay catch check
-	task.delay(STRIKE_SPEED, function()
-		if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+	task.delay(LUNGE_T, function()
+		if not player.Character then
+			beginIdle()
+			return
+		end
+		local liveHRP = player.Character:FindFirstChild("HumanoidRootPart")
+		if not liveHRP then
 			beginIdle()
 			return
 		end
 
-		local currentHRP = player.Character.HumanoidRootPart
-		local dodgeDistance = (currentHRP.Position - strikeTargetPos).Magnitude
-
-		-- Make the dodge radius wider if the monster has long arms!
+		-- How big is the "you got caught" window?
 		local hitRadius = 3.5
 		if table.find(activeRules, Constants.Rules.MONSTER_REACH) then
-			hitRadius = 8 -- Harder to dodge when REACH rule is active
+			hitRadius = 8.0 -- harder to dodge with long arms
 		end
 
-		if dodgeDistance <= hitRadius then
-			-- ❌ CAUGHT!
-			currentHRP.Anchored = true
-
-			-- Force player to look at monster
-			local playerLook = Vector3.new(rootPart.Position.X, currentHRP.Position.Y, rootPart.Position.Z)
-			currentHRP.CFrame = CFrame.lookAt(currentHRP.Position, playerLook)
-
-			-- Kill the player
-			local targetHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
-			if targetHumanoid then
-				targetHumanoid.Health = 0
+		-- Did the player move out of the snapshot position in time?
+		if (liveHRP.Position - snapPos).Magnitude <= hitRadius then
+			-- ✅ Caught!
+			sounds:playHitSounds()
+			local hum = player.Character:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum.Health = 0
 			end
-
 			RE.PlayerDied:FireAllClients(player.Name)
-
-			task.delay(1.5, function()
-				beginIdle()
-			end)
+			task.delay(2, beginIdle)
 		else
-			-- ✅ MISSED! Player dodged out of the way!
-			task.delay(0.5, function()
+			-- ❌ Missed — player dodged
+			liveHRP.Anchored = false
+			task.delay(1.2, function()
 				if state == "CATCH" then
 					beginChase(player)
 				end
@@ -435,145 +381,159 @@ local function beginStrike(player: Player)
 	end)
 end
 
--- ── MOVEMENT ──────────────────────────────────────────────────
--- Kembalikan true jika sudah "sampai" di targetPos
+-- ── Movement ──────────────────────────────────────────────────
 
-local function stepToward(targetPos: Vector3, speed: number, dt: number): boolean
+local function stepToward(target: Vector3, speed: number, dt: number): boolean
 	local pivot = monster:GetPivot()
-	local flat = Vector3.new(targetPos.X, pivot.Position.Y, targetPos.Z)
+	local flat = Vector3.new(target.X, pivot.Position.Y, target.Z)
 	local dir = flat - pivot.Position
 	local dist = dir.Magnitude
-
 	if dist < 0.6 then
 		return true
-	end -- sudah cukup dekat
+	end
 
 	local step = math.min(speed * dt, dist)
 	local newPos = pivot.Position + dir.Unit * step
-	-- local lookAt  = Vector3.new(flat.X, newPos.Y, flat.Z)
-	-- monster:PivotTo(CFrame.lookAt(newPos, lookAt))
-	-- Replace your lookAt and PivotTo lines with this one line:
-	if dist > 0.001 then
-		monster:PivotTo(CFrame.lookAt(newPos, newPos + dir.Unit))
-	else
-		monster:PivotTo(CFrame.new(newPos))
-	end
-
+	monster:PivotTo(CFrame.lookAt(newPos, newPos + dir.Unit))
 	return false
 end
 
--- ── IDLE WANDER HELPER ────────────────────────────────────────
-
 local function pickIdleTarget(): Vector3
 	local col, row = worldToTile(rootPart.Position)
-	local tries = 0
-	repeat
-		tries += 1
-		local dc = math.random(-IDLE_RANGE, IDLE_RANGE)
-		local dr = math.random(-IDLE_RANGE, IDLE_RANGE)
-		local nc, nr = col + dc, row + dr
+	for _ = 1, 30 do
+		local nc = col + math.random(-IDLE_RANGE, IDLE_RANGE)
+		local nr = row + math.random(-IDLE_RANGE, IDLE_RANGE)
 		if isTileWalkable(nc, nr) then
 			return tileToWorld(nc, nr)
 		end
-	until tries > 20
+	end
 	return tileToWorld(col, row)
 end
 
--- ── MAIN LOOP (RunService.Heartbeat) ─────────────────────────
+-- ── MONSTER_REACH: Arm Extension ─────────────────────────────
+-- Welds a claw-extension part below each arm so they look longer.
+-- Only runs when MONSTER_REACH rule is active.
 
-local broadcastClock = 0
-local sensorClock = 0
-local SENSOR_INTERVAL = 0.25 -- detik antar sensor check
+local function applyReachVisual()
+	if not table.find(activeRules, Constants.Rules.MONSTER_REACH) then
+		return
+	end
+
+	-- SoulDragger uses lowercase: "leftarm", "rightarm"
+	-- R6 / R15 fallbacks included in case the rig differs
+	local limbNames = {
+		"leftarm",
+		"rightarm",
+		"Left Arm",
+		"Right Arm",
+		"LeftHand",
+		"RightHand",
+	}
+
+	for _, name in ipairs(limbNames) do
+		local limb = monster:FindFirstChild(name, true) -- true = recursive
+		if not limb or not limb:IsA("BasePart") then
+			continue
+		end
+		if limb:FindFirstChild("ReachExtension") then
+			continue
+		end -- already done
+
+		local ext = Instance.new("Part")
+		ext.Name = "ReachExtension"
+		ext.Size = Vector3.new(limb.Size.X * 0.75, 3.5, limb.Size.Z * 0.75)
+		ext.Color = limb.Color
+		ext.Material = limb.Material
+		ext.Transparency = 0
+		ext.CanCollide = false
+		ext.CanQuery = false
+		ext.Massless = true
+		-- Hang below the hand center
+		ext.CFrame = limb.CFrame * CFrame.new(0, -(limb.Size.Y / 2 + ext.Size.Y / 2), 0)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = limb
+		weld.Part1 = ext
+		weld.Parent = ext
+		ext.Parent = monster
+	end
+end
+
+-- ── Main Heartbeat ────────────────────────────────────────────
+
+local broadcastCD = 0.5
+local sensorCD = 0
+local SENSOR_INT = 0.25
 
 RunService.Heartbeat:Connect(function(dt)
 	if not gridReady then
 		return
 	end
 
-	broadcastClock += dt
-	sensorClock += dt
-	pathUpdateCD = math.max(0, pathUpdateCD - dt)
+	sensorCD += dt
+	broadcastCD = math.max(0, broadcastCD - dt)
+	pathCD = math.max(0, pathCD - dt)
 
-	local monsterPos = rootPart.Position
+	local monPos = rootPart.Position
 
-	-- ── Sensor check (setiap SENSOR_INTERVAL) ─────────────────
-	if sensorClock >= SENSOR_INTERVAL then
-		sensorClock = 0
-
-		local allPlayers = Players:GetPlayers()
+	-- Sensor + broadcast tick
+	if sensorCD >= SENSOR_INT then
+		sensorCD = 0
+		local all = Players:GetPlayers()
 
 		if state ~= "CATCH" then
-			-- Hearing check
-			local noiseHit = SensorSystem.CheckHearing(monsterPos, activeRules)
-			if noiseHit then
-				local pl = noiseHit.player
-				if pl and pl.Character then
-					beginChase(pl)
-				end
+			local heard = SensorSystem.CheckHearing(monPos, activeRules)
+			if heard and heard.player and heard.player.Character then
+				beginChase(heard.player)
 			end
 
-			-- Smell check (Day 7 — stub jalan tapi tidak trigger)
-			local smellTarget = SensorSystem.CheckSmell(monsterPos, allPlayers, activeRules)
-			if smellTarget then
-				beginChase(smellTarget)
+			local smelled = SensorSystem.CheckSmell(monPos, all, activeRules)
+			if smelled then
+				beginChase(smelled)
 			end
 
-			-- Vision check (Day 7 — stub)
-			local visionTarget = SensorSystem.CheckVision(monster, monsterPos, allPlayers, activeRules)
-			if visionTarget then
-				beginChase(visionTarget)
+			local seen = SensorSystem.CheckVision(monster, monPos, all, activeRules)
+			if seen then
+				beginChase(seen)
 			end
 
-			-- Lost timer countdown saat CHASE
 			if state == "CHASE" then
-				lostTimer -= SENSOR_INTERVAL
+				lostTimer -= SENSOR_INT
 				if lostTimer <= 0 then
 					beginIdle()
 				end
 			end
 		end
 
-		-- ── Broadcast posisi monster (minimap) ────────────────
-		if broadcastClock >= 0.5 then
-			broadcastClock = 0
+		if broadcastCD <= 0 then
+			broadcastCD = 0.5
 			RE.MonsterPosition:FireAllClients({
-				position = monsterPos,
+				position = monPos,
 				state = state,
 				monsterIndex = 1,
 			})
-
-			-- Kirim awareness level ke tiap player
-			for _, player in ipairs(allPlayers) do
-				local aw = SensorSystem.GetAwarenessForPlayer(
-					monsterPos,
-					monster,
-					player,
-					activeRules,
-					state == "CHASE",
-					chaseTarget
-				)
-				local noise = SensorSystem.GetRecentNoiseForPlayer(player)
-				RE.AwarenessUpdated:FireClient(player, aw, noise)
+			for _, pl in ipairs(all) do
+				local aw =
+					SensorSystem.GetAwarenessForPlayer(monPos, monster, pl, activeRules, state == "CHASE", chaseTarget)
+				local noise = SensorSystem.GetRecentNoiseForPlayer(pl)
+				RE.AwarenessUpdated:FireClient(pl, aw, noise)
 			end
 		end
 	end
 
-	-- ── IDLE state movement ────────────────────────────────────
+	-- IDLE movement
 	if state == "IDLE" then
-		local idleSpeed = Constants.MONSTER_SPEED_BASE * 0.45
-
 		if not idleTarget then
 			idleTarget = pickIdleTarget()
-			playAnim("Walk", true)
+			playMovement("Walk")
 		end
-
-		local reached = stepToward(idleTarget, idleSpeed, dt)
-		if reached then
-			idleTarget = nil -- pick a new one next frame
+		if stepToward(idleTarget :: Vector3, Constants.MONSTER_SPEED_BASE * 0.45, dt) then
+			idleTarget = nil
 		end
+		return
 	end
 
-	-- ── CHASE state movement ───────────────────────────────────
+	-- CHASE movement
 	if state == "CHASE" and chaseTarget then
 		local char = chaseTarget.Character
 		if not char then
@@ -586,139 +546,91 @@ RunService.Heartbeat:Connect(function(dt)
 			return
 		end
 
-		-- Monster speed dari level (from Constants)
-		local speed = math.min(
-			Constants.MONSTER_SPEED_BASE + (1 * Constants.MONSTER_SPEED_PER_LEVEL),
-			Constants.MONSTER_SPEED_MAX
-		)
-
-		-- Catch radius
-		local catchRadius = Constants.MONSTER_REACH_BASE
-		if table.find(activeRules, Constants.Rules.MONSTER_REACH) then
-			catchRadius += Constants.MONSTER_REACH_BONUS
+		local speed =
+			math.min(Constants.MONSTER_SPEED_BASE + Constants.MONSTER_SPEED_PER_LEVEL, Constants.MONSTER_SPEED_MAX)
+		if table.find(activeRules, Constants.Rules.MONSTER_FAST) then
+			speed = math.min(speed * 1.35, Constants.MONSTER_SPEED_MAX)
 		end
 
-		-- Check catch
-		local distToPlayer = (monsterPos - hrp.Position).Magnitude
-		if distToPlayer <= catchRadius then
+		local catchR = Constants.MONSTER_REACH_BASE
+		if table.find(activeRules, Constants.Rules.MONSTER_REACH) then
+			catchR += Constants.MONSTER_REACH_BONUS
+		end
+
+		if (monPos - hrp.Position).Magnitude <= catchR then
 			beginStrike(chaseTarget)
 			return
 		end
 
-		-- A* path update (setiap PATH_INTERVAL atau belum ada path)
-		if pathUpdateCD <= 0 or not currentPath then
-			pathUpdateCD = PATH_INTERVAL
-			local mCol, mRow = worldToTile(monsterPos)
-			local pCol, pRow = worldToTile(hrp.Position)
-			local newPath = aStar(mCol, mRow, pCol, pRow)
-			if newPath then
-				currentPath = newPath
-				waypointIndex = 1
-			else
-				-- Fallback: direct move (noclip menembus dinding)
-				currentPath = { { col = pCol, row = pRow } }
-				waypointIndex = 1
-			end
+		if pathCD <= 0 or not currentPath then
+			pathCD = PATH_INTERVAL
+			local mC, mR = worldToTile(monPos)
+			local pC, pR = worldToTile(hrp.Position)
+			currentPath = aStar(mC, mR, pC, pR) or { { col = pC, row = pR } }
+			waypointIdx = 1
 		end
 
-		-- Move along path
-		if currentPath and waypointIndex <= #currentPath then
-			local wp = currentPath[waypointIndex]
-			local wpWorld = tileToWorld(wp.col, wp.row)
-			-- Change it to use the monster's current Y height instead of the player's:
-			wpWorld = Vector3.new(wpWorld.X, rootPart.Position.Y, wpWorld.Z)
-
-			local reached = stepToward(wpWorld, speed, dt)
-			if reached then
-				waypointIndex += 1
-				-- Reset timer saat sampai waypoint → player mungkin sudah pindah
-				if waypointIndex > #currentPath then
-					pathUpdateCD = 0
+		if currentPath and waypointIdx <= #currentPath then
+			local wp = currentPath[waypointIdx]
+			local wpW = tileToWorld(wp.col, wp.row)
+			if stepToward(wpW, speed, dt) then
+				waypointIdx += 1
+				if waypointIdx > #currentPath then
+					pathCD = 0
 				end
 			end
 		end
 
-		-- Animasi run (jika belum)
-		-- Ensure Run is the active movement channel
 		playMovement("Run")
 	end
 
-	-- ── CATCH state: diam menunggu animasi selesai ─────────────
-	-- (tidak ada movement logic di sini)
+	-- CATCH state: tween handles movement, nothing to do here
 end)
 
--- ── REMOTE EVENT LISTENERS ────────────────────────────────────
+-- ── Remote Listeners ──────────────────────────────────────────
 
--- Noise dari player (coal drop, lever, footsteps, dll.)
-RE.PlayerMakeNoise.OnServerEvent:Connect(function(player, noiseLevel, position)
-	SensorSystem.AddNoise(player, position, noiseLevel)
+RE.PlayerMakeNoise.OnServerEvent:Connect(function(player, level, position)
+	SensorSystem.AddNoise(player, position, level)
 end)
 
--- Rules diterima dari RulesRandomizer Gilang
--- Server listens via BindableEvent or sets activeRules directly.
--- (OnClientEvent only exists on the client, not the server)
+-- ── Rules Processing ──────────────────────────────────────────
 
--- TESTING: aktifkan semua rules untuk test
-activeRules = {
-	Constants.Rules.MONSTER_HEAR,
-	Constants.Rules.MONSTER_SMELL,
-	Constants.Rules.MONSTER_SEE,
-	Constants.Rules.MONSTER_FAST,
-	-- Constants.Rules.MONSTER_REACH,
-}
-
--- ── VISUAL RULES (SAFE METHOD) ────────────────────────────────
-local function applyVisualRules()
-	if table.find(activeRules, Constants.Rules.MONSTER_REACH) then
-		-- Support for both R6 ("Left Arm") and R15 ("LeftHand" / "LeftLowerArm")
-		local targetLimbs = { "Left Arm", "Right Arm", "LeftHand", "RightHand" }
-
-		for _, limbName in ipairs(targetLimbs) do
-			local limb = monster:FindFirstChild(limbName)
-			if limb and limb:IsA("BasePart") then
-				-- 1. Create the stretched extension
-				local stretchPart = Instance.new("Part")
-				stretchPart.Name = "ReachExtension"
-				stretchPart.Size = Vector3.new(limb.Size.X, 3.5, limb.Size.Z) -- 3.5 studs longer!
-				stretchPart.Color = limb.Color
-				stretchPart.Material = limb.Material
-				stretchPart.Transparency = 0 -- Make it fully visible
-				stretchPart.CanCollide = false
-				stretchPart.CanQuery = false
-				stretchPart.Massless = true
-
-				-- 2. Position it so it hangs down from the original hand
-				stretchPart.CFrame = limb.CFrame * CFrame.new(0, -stretchPart.Size.Y / 2, 0)
-
-				-- 3. Weld it safely (Does NOT break animations!)
-				local weld = Instance.new("WeldConstraint")
-				weld.Part0 = limb
-				weld.Part1 = stretchPart
-				weld.Parent = stretchPart
-
-				stretchPart.Parent = monster
-			end
-		end
-	end
+local function onRulesActivated(rules: { string })
+	activeRules = rules
+	applyReachVisual()
+	DuplicationSystem.processRules(monster, rules)
 end
 
--- Apply the visuals before starting
-applyVisualRules()
+-- Gilang fires a BindableEvent alongside his RemoteEvent for server→server comms
+local rulesBE = ReplicatedStorage:FindFirstChild("ServerRulesActivated")
+if rulesBE and rulesBE:IsA("BindableEvent") then
+	rulesBE.Event:Connect(onRulesActivated)
+end
 
--- ── STARTUP SEQUENCE ──────────────────────────────────────────
--- Wait for the Server BindableEvent, NOT the RemoteEvent!
-ReplicatedStorage:WaitForChild("ServerMapGenerated").Event:Connect(function(realGrid, hallInfo)
+-- ── TEST rules (remove / comment out once Gilang's system is wired) ──
+activeRules = {
+	Constants.Rules.MONSTER_HEAR,
+	-- Constants.Rules.MONSTER_SMELL,
+	-- Constants.Rules.MONSTER_SEE,
+	-- Constants.Rules.MONSTER_REACH,
+	-- Constants.Rules.MONSTER_DUPLICATE,
+}
+applyReachVisual()
+
+-- ── Startup ───────────────────────────────────────────────────
+
+local mapBE = ReplicatedStorage:WaitForChild("ServerMapGenerated")
+mapBE.Event:Connect(function(realGrid, hallInfo)
 	grid = realGrid
 	gridReady = true
 
-	-- Get the exact world coordinates of the player spawn point
-	local spawnWorldPos =
-		Vector3.new((hallInfo.spawnCol - 1) * Constants.TILE_SIZE, 0, (hallInfo.spawnRow - 1) * Constants.TILE_SIZE)
+	local spawnWorld = Vector3.new((hallInfo.spawnCol - 1) * TILE, MONSTER_Y, (hallInfo.spawnRow - 1) * TILE)
 
-	-- Spawn the monster in an arc 6 tiles away from the players
-	spawnMonsterInArc(spawnWorldPos, 6)
-
-	-- Start idle wandering now that the map exists
+	applyReachVisual()
+	spawnAtArc(spawnWorld, 8)
+	DuplicationSystem.processRules(monster, activeRules)
 	beginIdle()
-	print("[MonsterAI] Map Loaded. Monster is officially hunting!")
+	print("[MonsterAI] Map loaded. Hunt begins.")
 end)
+
+print("[MonsterAI] Initialized. Waiting for map...")

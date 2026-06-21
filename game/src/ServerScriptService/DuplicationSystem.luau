@@ -11,10 +11,10 @@ local Constants = require(game.ReplicatedStorage.Shared.Constants)
 local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
-local MAX_TOTAL = 4 -- including original (so max 3 clones)
+local MAX_TOTAL = 8 -- including original (so max 3 clones)
 local CLONE_SPEED = 13 -- studs/s
 local CLONE_Y = 3 -- must match MonsterAI's MONSTER_Y
-local TILE = 16 -- must match MapGenerator's TILE_SIZE
+-- local TILE = 16 -- must match MapGenerator's TILE_SIZE
 
 local activeClones: { Model } = {}
 local RE_PlayerDied: RemoteEvent?
