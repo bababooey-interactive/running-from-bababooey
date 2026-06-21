@@ -63,6 +63,12 @@ local WALL_Y_OFFSET  = (2.969966411590576 * WALL_SCALE) / 2 -- setengah tinggi w
 local CEILING_SCALE    = 4
 local CEILING_Y_OFFSET = Constants.WALL_HEIGHT - 8
 
+-- FLOOR_SCALE dihitung dari ukuran asli floor_flat (4.03 x 0.43 x 4.01
+-- studs, dicek via GetBoundingBox), sama persis polanya dengan
+-- WALL_SCALE -- supaya lebar X/Z pas TILE_SIZE (8 studs).
+local FLOOR_SCALE = TILE_SIZE / 4.025826454162598 -- ≈ 1.991
+local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ketebalan HASIL scale)
+
 local PROP_SCALE      = 3
 local FIREPLACE_SCALE = 4
 local CONVEYOR_SCALE  = 4
@@ -149,6 +155,7 @@ local MapPieces = Assets:WaitForChild("MapPieces")
 
 local WallsFolder     = MapPieces:WaitForChild("Walls")
 local CeilingsFolder  = MapPieces:WaitForChild("Ceilings")
+local FloorsFolder    = MapPieces:WaitForChild("Floors")
 local PropsFolder      = MapPieces:WaitForChild("Props")
 local SpecialFolder    = MapPieces:FindFirstChild("Special")
 local TaskObjectsFolder = MapPieces:WaitForChild("TaskObjects")
@@ -166,6 +173,9 @@ local CeilingFlat       = CeilingsFolder:WaitForChild("ceiling_flat")
 local CeilingArch       = CeilingsFolder:FindFirstChild("ceiling_arch")
 local CeilingCrack      = CeilingsFolder:FindFirstChild("ceiling_crack")
 local CeilingStalactite = CeilingsFolder:FindFirstChild("Ceiling_Stalactite_Group")
+
+local FloorFlat  = FloorsFolder:WaitForChild("floor_flat")
+local FloorCrack = FloorsFolder:FindFirstChild("floor_crack")
 
 local BoulderLarge  = PropsFolder:FindFirstChild("boulder_large")
 local BoulderMedium = PropsFolder:FindFirstChild("boulder_medium")
@@ -576,31 +586,34 @@ end
 local function placeFloor(mapFolder, col, row, tileType, hallInfo)
 	local pos = gridToWorld(col, row)
 
-	local color = Color3.fromRGB(60, 60, 60)
-	local material = Enum.Material.Slate
-
 	local isFireplaceTile = hallInfo
 		and col == hallInfo.fireplaceCol
 		and row == hallInfo.fireplaceRow
 
-	if isFireplaceTile then
-		color = Color3.fromRGB(90, 55, 35)
-	elseif tileType == Tile.SPAWN then
-		color = Color3.fromRGB(60, 90, 60)
-	elseif tileType == Tile.CONVEYOR then
-		color = Color3.fromRGB(35, 40, 50)
-		material = Enum.Material.Metal
+	-- Pilih varian floor (sama logic seperti ceiling: kebanyakan flat,
+	-- sesekali crack untuk variasi visual)
+	local selectedFloor = FloorFlat
+	if FloorCrack and math.random() < 0.1 then
+		selectedFloor = FloorCrack
 	end
 
-	local floor = createPart(
-		"Floor",
-		Vector3.new(TILE_SIZE, FLOOR_HEIGHT, TILE_SIZE),
+	-- Floor di-clone TANPA scale tambahan (asumsikan sudah didesain
+	-- pas TILE_SIZE, sama seperti ceiling). Kalau ternyata floor_flat
+	-- ukurannya beda dari ceiling_flat, perlu dicek GetBoundingBox()
+	-- dulu seperti kasus wall/darkzone sebelumnya.
+	local clone = cloneAsset(
+		selectedFloor,
+		mapFolder,
 		CFrame.new(pos),
-		color,
-		material
+		FLOOR_SCALE, -- pakai scale yang sama dengan ceiling, karena ini hasil duplikat ceiling
+		false
 	)
 
-	floor.Parent = mapFolder
+	-- Pewarnaan khusus per tile type (spawn/conveyor/fireplace) --
+	-- TIDAK BISA lagi pakai .Color kalau asset floor pakai banyak
+	-- Part/texture custom. Kalau mau tetap ada pembedaan warna visual,
+	-- perlu loop descendants & set Color tiap BasePart (lihat catatan
+	-- di bawah).
 end
 
 local function placeCeiling(mapFolder, col, row, tileType)
@@ -958,7 +971,7 @@ local function placeLantern(mapFolder, col, row)
 	cloneAsset(
 		LanternAsset,
 		mapFolder,
-		CFrame.new(basePos + Vector3.new(0, Constants.WALL_HEIGHT * 0.7, 0)),
+		CFrame.new(basePos + Vector3.new(0, Constants.WALL_HEIGHT - 22, 0)),
 		LANTERN_SCALE,
 		false
 	)
@@ -1058,10 +1071,20 @@ local function placeDarkZones(grid, hallInfo)
 				local clone = cloneAsset(
 					variant,
 					darkZonesFolder,
-					CFrame.new(basePos + Vector3.new(0, 0.1, 0)),
-					DARKZONE_SCALE,
+					CFrame.new(basePos + Vector3.new(0, 6, 0)),
+					1, -- scale 1, karena kita resize manual di bawah
 					false
 				)
+
+				-- Paksa lebar X & Z dark zone supaya SELALU pas TILE_SIZE (8 studs),
+				-- biar nutup penuh lebar lorong/hall tanpa celah, terlepas dari ukuran
+				-- asli tiap varian (Alley/Corridor/Room beda-beda). Tinggi (Y) TIDAK
+				-- diubah karena offset 5 stud sudah pas untuk tinggi asli 10 stud.
+				if clone then
+					local darkZoneHeight = Constants.WALL_HEIGHT - 8 -- 10 stud
+					clone.Size = Vector3.new(TILE_SIZE, darkZoneHeight, TILE_SIZE)
+					clone.CFrame = CFrame.new(basePos + Vector3.new(0, darkZoneHeight/2 , 0))
+				end
 
 				clone:SetAttribute("IsDarkZone", true)
 
