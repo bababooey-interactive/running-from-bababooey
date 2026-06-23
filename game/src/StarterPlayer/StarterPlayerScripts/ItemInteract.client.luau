@@ -1,21 +1,7 @@
 -- =============================================================
 --  ItemInteract.client.luau
---  StarterPlayerScripts
---
---  Client-side untuk sistem pickup & carry:
---    1. Nampilin ProximityPrompt "Pick Up" di setiap food/coal item
---       (dibuat dynamic saat item spawn, bukan di MapGenerator)
---    2. Saat player pegang item:
---       - Food: nampilin BillboardGui "🍖 Tekan E untuk Makan"
---       - Coal: cek jarak fireplace setiap frame, nampilin prompt
---         "Drop Coal" saat sudah dekat
---    3. Kirim RemoteEvent ke server (PickupItem, EatFood, DepositCoal, DropItem)
---
---  CATATAN PENTING:
---    ProximityPrompt "Pick Up" TIDAK di-setup di MapGenerator lagi.
---    Script ini yang setup prompt untuk semua item di Workspace secara
---    otomatis saat item muncul (DescendantAdded), lalu menghubungkan
---    ke RemoteEvent PickupItem.
+--  📁 game/src/StarterPlayer/StarterPlayerScripts/ItemInteract.client.luau
+--  🔧 GANTI SELURUH ISI file lama
 -- =============================================================
 
 local Players           = game:GetService("Players")
@@ -23,7 +9,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
-local CollectionService = game:GetService("CollectionService")
 
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -37,26 +22,22 @@ local RE_DepositCoal     = Remotes:WaitForChild("DepositCoal")
 local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 
 -- ── Config ─────────────────────────────────────────────────────
-local FIREPLACE_DEPOSIT_RADIUS = 12  -- harus sama dengan server
-local PICKUP_RADIUS            = 6   -- jarak ProximityPrompt muncul
-local COAL_DEPOSIT_KEY         = Enum.KeyCode.F  -- tekan F untuk deposit
-local EAT_KEY                  = Enum.KeyCode.E  -- tekan E untuk makan
+local FIREPLACE_DEPOSIT_RADIUS = 12
+local PICKUP_RADIUS            = 5
 
 -- ── State ──────────────────────────────────────────────────────
-local heldItem     = nil   -- Model yang sedang dipegang
-local heldCategory = nil   -- "food" | "coal" | nil
-
-local eatGui       = nil   -- BillboardGui "Eat" yang menempel di item
-local depositGui   = nil   -- ScreenGui prompt "Drop Coal"
-
-local promptConnections = {} -- { [model] = connection } untuk cleanup
+local heldItem     = nil
+local heldCategory = nil
+local eatGui       = nil
+local depositGui   = nil
+local promptSetup  = {}
 
 -- ── Helpers ────────────────────────────────────────────────────
 
 local function getPrimaryOrFirstPart(model)
-	if model.PrimaryPart then
-		return model.PrimaryPart
-	end
+	if not model then return nil end
+	if model:IsA("BasePart") then return model end
+	if model.PrimaryPart then return model.PrimaryPart end
 	return model:FindFirstChildWhichIsA("BasePart")
 end
 
@@ -66,11 +47,14 @@ local function findFireplacePosition()
 		for _, child in ipairs(genMap:GetDescendants()) do
 			if child:IsA("Model") and child.Name:lower():find("fireplace") then
 				local part = getPrimaryOrFirstPart(child)
-				if part then
-					return part.Position
-				end
+				if part then return part.Position end
 			end
 		end
+	end
+	local fp = Workspace:FindFirstChild("old_fireplace_prop")
+	if fp then
+		local part = getPrimaryOrFirstPart(fp)
+		if part then return part.Position end
 	end
 	return nil
 end
@@ -83,68 +67,75 @@ local function isNearFireplace()
 	return (root.Position - fpPos).Magnitude <= FIREPLACE_DEPOSIT_RADIUS
 end
 
--- ── GUI Builders ───────────────────────────────────────────────
+local function getItemCategory(model)
+	if not model or not model:IsA("Model") then return nil end
 
--- BillboardGui yang nempel di atas item yang dipegang
+	local taskType = model:GetAttribute("TaskType")
+	if taskType == "coal" then return "coal" end
+
+	-- Telusur parent chain cari folder FoodItems
+	local p = model.Parent
+	while p do
+		if p.Name == "FoodItems" then return "food" end
+		p = p.Parent
+	end
+
+	if model:GetAttribute("ItemCategory") == "food" then return "food" end
+
+	return nil
+end
+
+-- ── GUI ────────────────────────────────────────────────────────
+
 local function createEatGui(itemModel)
 	if eatGui then eatGui:Destroy() end
-
 	local part = getPrimaryOrFirstPart(itemModel)
 	if not part then return end
 
 	local gui = Instance.new("BillboardGui")
-	gui.Name            = "EatPrompt"
-	gui.Adornee         = part
-	gui.Size            = UDim2.new(0, 160, 0, 40)
-	gui.StudsOffset     = Vector3.new(0, 2.5, 0)
-	gui.AlwaysOnTop     = true
-	gui.ResetOnSpawn    = false
+	gui.Name         = "EatPrompt"
+	gui.Adornee      = part
+	gui.Size         = UDim2.new(0, 200, 0, 44)
+	gui.StudsOffset  = Vector3.new(0, 3, 0)
+	gui.AlwaysOnTop  = true
+	gui.ResetOnSpawn = false
 
 	local frame = Instance.new("Frame")
-	frame.Size            = UDim2.new(1, 0, 1, 0)
-	frame.BackgroundColor3 = Color3.fromRGB(30, 20, 10)
-	frame.BackgroundTransparency = 0.25
-	frame.BorderSizePixel = 0
+	frame.Size                   = UDim2.new(1, 0, 1, 0)
+	frame.BackgroundColor3       = Color3.fromRGB(30, 20, 10)
+	frame.BackgroundTransparency = 0.2
+	frame.BorderSizePixel        = 0
 	frame.Parent = gui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = frame
+	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(1, 0, 1, 0)
+	label.Size                   = UDim2.new(1, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Text = string.format("[E] Makan  ·  [Q] Drop")
-	label.TextColor3 = Color3.fromRGB(255, 230, 160)
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.Parent = frame
+	label.Text                   = "[E] Makan   [Q] Drop"
+	label.TextColor3             = Color3.fromRGB(255, 230, 160)
+	label.TextScaled             = true
+	label.Font                   = Enum.Font.GothamBold
+	label.Parent                 = frame
 
 	gui.Parent = player.PlayerGui
 	eatGui = gui
 end
 
--- ScreenGui untuk tombol deposit coal (muncul saat dekat fireplace)
 local function createDepositGui()
-	if depositGui then return end  -- sudah ada
+	if depositGui then return end
 
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name         = "CoalDepositPrompt"
-	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	local sg = Instance.new("ScreenGui")
+	sg.Name         = "CoalDepositPrompt"
+	sg.ResetOnSpawn = false
 
 	local frame = Instance.new("Frame")
-	frame.Name                   = "Prompt"
-	frame.Size                   = UDim2.new(0, 220, 0, 50)
-	frame.Position               = UDim2.new(0.5, -110, 0.82, 0)
+	frame.Size                   = UDim2.new(0, 240, 0, 54)
+	frame.Position               = UDim2.new(0.5, -120, 0.82, 0)
 	frame.BackgroundColor3       = Color3.fromRGB(40, 25, 10)
 	frame.BackgroundTransparency = 0.15
 	frame.BorderSizePixel        = 0
-	frame.Parent = screenGui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = frame
+	frame.Parent = sg
+	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Color     = Color3.fromRGB(255, 140, 0)
@@ -152,176 +143,116 @@ local function createDepositGui()
 	stroke.Parent    = frame
 
 	local label = Instance.new("TextLabel")
-	label.Size                 = UDim2.new(1, 0, 1, 0)
+	label.Size                   = UDim2.new(1, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Text                 = "🔥  [F] Lempar Coal ke Api"
-	label.TextColor3           = Color3.fromRGB(255, 200, 80)
-	label.TextScaled           = true
-	label.Font                 = Enum.Font.GothamBold
-	label.Parent               = frame
+	label.Text                   = "🔥  [F] Lempar Coal ke Api"
+	label.TextColor3             = Color3.fromRGB(255, 200, 80)
+	label.TextScaled             = true
+	label.Font                   = Enum.Font.GothamBold
+	label.Parent                 = frame
 
-	screenGui.Parent = player.PlayerGui
-	depositGui = screenGui
+	sg.Parent = player.PlayerGui
+	depositGui = sg
 end
 
 local function destroyDepositGui()
-	if depositGui then
-		depositGui:Destroy()
-		depositGui = nil
-	end
+	if depositGui then depositGui:Destroy(); depositGui = nil end
 end
 
 local function destroyEatGui()
-	if eatGui then
-		eatGui:Destroy()
-		eatGui = nil
-	end
+	if eatGui then eatGui:Destroy(); eatGui = nil end
 end
 
--- ── Item Detection & ProximityPrompt Setup ─────────────────────
+-- ── Setup ProximityPrompt per item ─────────────────────────────
 
--- Tentukan apakah suatu Model adalah item yang bisa dipickup
-local function isPickupable(model)
-	if not model:IsA("Model") then return false, nil end
-
-	-- Coal
-	local taskType = model:GetAttribute("TaskType")
-	if taskType == "coal" then
-		return true, "coal"
-	end
-
-	-- Food: parent folder bernama FoodItems
-	local parent = model.Parent
-	if parent and parent.Name == "FoodItems" then
-		return true, "food"
-	end
-
-	-- Food: attribute eksplisit
-	if model:GetAttribute("ItemCategory") == "food" then
-		return true, "food"
-	end
-
-	-- Food: nama
-	local name = model.Name:lower()
-	if name:find("carrot") or name:find("meat") or name:find("water") then
-		-- Double-check: ada di Workspace/FoodItems atau TaskObjects? Tidak
-		-- Kita butuh lebih strict supaya tidak pickup random props.
-		-- Hanya pickup kalau ada di FoodItems folder
-		if parent and parent.Name == "FoodItems" then
-			return true, "food"
-		end
-	end
-
-	return false, nil
-end
-
-local function setupPickupPrompt(model)
-	-- Jangan re-setup kalau sudah ada
-	if promptConnections[model] then
-		return
-	end
-
-	local pickupable, category = isPickupable(model)
-	if not pickupable then
-		return
-	end
+local function setupPrompt(model)
+	if promptSetup[model] then return end
+	local category = getItemCategory(model)
+	if not category then return end
 
 	local targetPart = getPrimaryOrFirstPart(model)
-	if not targetPart then
-		return
+	if not targetPart then return end
+
+	-- Hapus prompt lama (dari MapGenerator/hookFoodItem)
+	for _, pp in ipairs(model:GetDescendants()) do
+		if pp:IsA("ProximityPrompt") then pp:Destroy() end
 	end
 
-	-- Label sesuai kategori
-	local actionText = category == "coal" and "Ambil" or "Ambil"
 	local objectText = category == "coal" and "🪨 Coal" or "🍖 " .. model.Name
 
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name               = "PickupPrompt"
-	prompt.ActionText         = actionText
-	prompt.ObjectText         = objectText
-	prompt.KeyboardKeyCode    = Enum.KeyCode.E
-	prompt.HoldDuration       = 0
+	prompt.ActionText            = "Ambil"
+	prompt.ObjectText            = objectText
+	prompt.KeyboardKeyCode       = Enum.KeyCode.E
+	prompt.HoldDuration          = 0
 	prompt.MaxActivationDistance = PICKUP_RADIUS
-	prompt.RequiresLineOfSight = false
-	prompt.Parent             = targetPart
+	prompt.RequiresLineOfSight   = false
+	prompt.Parent                = targetPart
 
-	-- Trigger: kirim ke server
-	local conn = prompt.Triggered:Connect(function()
-		if heldItem then
-			-- Sudah pegang sesuatu, jangan pickup lagi
-			return
-		end
+	prompt.Triggered:Connect(function()
+		if heldItem then return end
 		RE_PickupItem:FireServer(model)
 	end)
 
-	-- Simpan connection supaya bisa di-cleanup
-	promptConnections[model] = {
-		prompt = prompt,
-		conn   = conn,
-	}
-end
+	promptSetup[model] = true
 
-local function cleanupPickupPrompt(model)
-	local data = promptConnections[model]
-	if data then
-		if data.conn then data.conn:Disconnect() end
-		if data.prompt and data.prompt.Parent then data.prompt:Destroy() end
-		promptConnections[model] = nil
-	end
-end
-
--- Setup prompt untuk semua item yang sudah ada di Workspace
-local function scanExistingItems()
-	-- Scan FoodItems folder
-	local foodFolder = Workspace:FindFirstChild("FoodItems")
-	if foodFolder then
-		for _, child in ipairs(foodFolder:GetChildren()) do
-			setupPickupPrompt(child)
+	model.AncestryChanged:Connect(function()
+		if not model.Parent then
+			promptSetup[model] = nil
 		end
-	end
+	end)
+end
 
-	-- Scan TaskObjects (untuk coal)
-	local taskFolder = Workspace:FindFirstChild("TaskObjects")
-	if taskFolder then
-		for _, child in ipairs(taskFolder:GetDescendants()) do
-			if child:IsA("Model") and child:GetAttribute("TaskType") == "coal" then
-				setupPickupPrompt(child)
+-- ── Scan folder ────────────────────────────────────────────────
+
+local function scanFolder(folder)
+	if not folder then return end
+	for _, child in ipairs(folder:GetChildren()) do
+		if child:IsA("Model") then setupPrompt(child) end
+		-- juga scan 1 level dalam (untuk subfolder TaskObjects/Coal/...)
+		if child:IsA("Folder") then
+			for _, grandchild in ipairs(child:GetChildren()) do
+				if grandchild:IsA("Model") then setupPrompt(grandchild) end
 			end
 		end
 	end
-end
-
--- Watch untuk item baru yang spawn (saat map di-generate ulang)
-Workspace.DescendantAdded:Connect(function(desc)
-	if desc:IsA("Model") then
+	folder.ChildAdded:Connect(function(child)
 		task.defer(function()
-			-- task.defer supaya attribute sempat di-set dulu
-			if desc.Parent then
-				setupPickupPrompt(desc)
+			if child and child.Parent then
+				if child:IsA("Model") then setupPrompt(child) end
+				if child:IsA("Folder") then
+					for _, gc in ipairs(child:GetChildren()) do
+						if gc:IsA("Model") then setupPrompt(gc) end
+					end
+				end
 			end
 		end)
+	end)
+end
+
+local function doScan()
+	scanFolder(Workspace:FindFirstChild("FoodItems"))
+	scanFolder(Workspace:FindFirstChild("TaskObjects"))
+end
+
+-- Watch kalau folder belum ada saat script jalan
+Workspace.ChildAdded:Connect(function(child)
+	if child.Name == "FoodItems" or child.Name == "TaskObjects" then
+		task.wait(0.5)
+		scanFolder(child)
 	end
 end)
 
-Workspace.DescendantRemoving:Connect(function(desc)
-	if desc:IsA("Model") then
-		cleanupPickupPrompt(desc)
-	end
-end)
+doScan()
 
--- ── Held Item State ────────────────────────────────────────────
+-- ── HeldItemChanged ────────────────────────────────────────────
 
 RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category)
-	if whoPlayer ~= player then
-		-- Bisa dipakai untuk animasi tangan orang lain di masa depan
-		return
-	end
-
+	if whoPlayer ~= player then return end
 	heldItem     = itemModel
 	heldCategory = category
 
 	if not itemModel then
-		-- Tidak pegang apa-apa
 		destroyEatGui()
 		destroyDepositGui()
 		return
@@ -329,66 +260,45 @@ RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category
 
 	if category == "food" then
 		createEatGui(itemModel)
-	elseif category == "coal" then
+	else
 		destroyEatGui()
-		-- depositGui akan muncul/hilang di RunService loop sesuai jarak
 	end
 end)
 
--- ── Per-Frame Update (cek jarak fireplace untuk coal) ──────────
+-- ── Per-frame cek jarak fireplace ──────────────────────────────
 
 RunService.Heartbeat:Connect(function()
 	if heldCategory ~= "coal" then
 		if depositGui then destroyDepositGui() end
 		return
 	end
-
-	if isNearFireplace() then
-		createDepositGui()
-	else
-		destroyDepositGui()
-	end
+	if isNearFireplace() then createDepositGui()
+	else destroyDepositGui() end
 end)
 
--- ── Input Handler (E = Eat, F = Deposit, Q = Drop) ─────────────
+-- ── Input ──────────────────────────────────────────────────────
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
-
-	-- E: makan food yang dipegang
-	if input.KeyCode == EAT_KEY and heldCategory == "food" then
+	if input.KeyCode == Enum.KeyCode.E and heldCategory == "food" then
 		RE_EatFood:FireServer()
-		return
-	end
-
-	-- F: deposit coal ke fireplace
-	if input.KeyCode == COAL_DEPOSIT_KEY and heldCategory == "coal" then
-		if isNearFireplace() then
-			RE_DepositCoal:FireServer()
-		end
-		return
-	end
-
-	-- Q: drop item yang dipegang
-	if input.KeyCode == Enum.KeyCode.Q and heldItem then
+	elseif input.KeyCode == Enum.KeyCode.F and heldCategory == "coal" then
+		if isNearFireplace() then RE_DepositCoal:FireServer() end
+	elseif input.KeyCode == Enum.KeyCode.Q and heldItem then
 		RE_DropItem:FireServer()
-		return
 	end
 end)
 
 -- ── Character refresh ──────────────────────────────────────────
 
 player.CharacterAdded:Connect(function(newChar)
-	character = newChar
+	character    = newChar
 	heldItem     = nil
 	heldCategory = nil
 	destroyEatGui()
 	destroyDepositGui()
+	task.wait(1)
+	doScan()
 end)
-
--- ── Initial scan (tunggu map selesai generate) ─────────────────
-
-task.wait(3)  -- beri waktu MapGenerator selesai
-scanExistingItems()
 
 print("[ItemInteract] Client initialized.")
