@@ -574,10 +574,27 @@ local function onRulesActivated(rules: { string })
 	DuplicationSystem.processRules(monster, rules)
 end
 
--- Gilang fires a BindableEvent alongside his RemoteEvent for server→server comms
-local rulesBE = ReplicatedStorage:FindFirstChild("ServerRulesActivated")
-if rulesBE and rulesBE:IsA("BindableEvent") then
-	rulesBE.Event:Connect(onRulesActivated)
+-- 1. Listen for the correct BindableEvent from GameManager
+local RulesBindable = Remotes:WaitForChild("RulesBindable", 5)
+if RulesBindable and RulesBindable:IsA("BindableEvent") then
+	RulesBindable.Event:Connect(onRulesActivated)
+end
+
+-- 2. FALLBACK: Fix the timing issue!
+-- If GameManager already fired the event BEFORE MonsterAI finished loading,
+-- we can just read the rules directly from the SessionInfo folder GameManager created.
+local sessionInfo = ReplicatedStorage:FindFirstChild("SessionInfo")
+if sessionInfo then
+	local rulesFolder = sessionInfo:FindFirstChild("ActiveRules")
+	if rulesFolder then
+		local loadedRules = {}
+		for _, stringVal in ipairs(rulesFolder:GetChildren()) do
+			table.insert(loadedRules, stringVal.Value)
+		end
+		if #loadedRules > 0 then
+			onRulesActivated(loadedRules)
+		end
+	end
 end
 
 -- ── TEST rules (remove / comment out once Gilang's system is wired) ──
