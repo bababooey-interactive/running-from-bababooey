@@ -24,12 +24,11 @@ DuplicationSystem.init(RE.PlayerDied)
 
 -- ── Monster Setup ─────────────────────────────────────────────
 -- OPTION A (current): monster pre-placed in Workspace
-local monster = workspace:WaitForChild("SoulDragger")
+-- local monster = workspace:WaitForChild("SoulDragger")
 
 -- OPTION B (recommended after reorganization):
--- local monster = game:GetService("ServerStorage")
---     :WaitForChild("Characters"):WaitForChild("SoulDragger"):Clone()
--- monster.Parent = workspace
+local monster = game:GetService("ServerStorage"):WaitForChild("Characters"):WaitForChild("SoulDragger"):Clone()
+monster.Parent = workspace
 
 for _, part in ipairs(monster:GetDescendants()) do
 	if part:IsA("BasePart") then
@@ -585,11 +584,11 @@ end
 
 -- ── TEST rules (remove / comment out once Gilang's system is wired) ──
 activeRules = {
-	Constants.Rules.MONSTER_HEAR,
-	Constants.Rules.MONSTER_SMELL,
-	Constants.Rules.MONSTER_SEE,
-	Constants.Rules.MONSTER_REACH,
-	Constants.Rules.MONSTER_DUPLICATE,
+	-- Constants.Rules.MONSTER_HEAR,
+	-- Constants.Rules.MONSTER_SMELL,
+	-- Constants.Rules.MONSTER_SEE,
+	-- Constants.Rules.MONSTER_REACH,
+	-- Constants.Rules.MONSTER_DUPLICATE,
 }
 applyReachVisual()
 

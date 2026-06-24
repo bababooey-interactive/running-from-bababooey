@@ -280,7 +280,7 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
-	if input.KeyCode == Enum.KeyCode.E and heldCategory == "food" then
+	if input.KeyCode == Enum.KeyCode.T and heldCategory == "food" then
 		RE_EatFood:FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F and heldCategory == "coal" then
 		if isNearFireplace() then RE_DepositCoal:FireServer() end

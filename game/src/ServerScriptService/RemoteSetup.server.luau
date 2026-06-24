@@ -53,5 +53,12 @@ ensureRemote("LevelProgressSaved") -- server→client: level progress
 ensureRemote("GameOver") -- server→all: game over
 ensureRemote("LevelCleared") -- server→all: level cleared
 ensureRemote("TeleportDataReceived") -- server→client: teleport data
+-- Item Pickup System
+ensureRemote("PickupItem")
+ensureRemote("DropItem")
+ensureRemote("DepositCoal")
+ensureRemote("HeldItemChanged")
+ensureRemote("CoalDeposited")
+ensureRemote("HungerChanged")
 
 print("[RemoteSetup] Semua RemoteEvent sudah siap di ReplicatedStorage.Remotes")

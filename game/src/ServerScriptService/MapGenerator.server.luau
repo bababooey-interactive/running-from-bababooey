@@ -1139,35 +1139,35 @@ end
 -- BELUM saya lihat). Saya auto-buat ProximityPrompt sederhana yang fire
 -- EatFood ke server, TAPI ini perlu dikonfirmasi/disesuaikan dengan
 -- Aang/Julian supaya tidak dobel-implementasi.
-local function hookFoodItem(foodModel)
-	local prompt = foodModel:FindFirstChildOfClass("ProximityPrompt")
-		or foodModel:FindFirstChild("ProximityPrompt", true)
+--local function hookFoodItem(foodModel)
+--	local prompt = foodModel:FindFirstChildOfClass("ProximityPrompt")
+--		or foodModel:FindFirstChild("ProximityPrompt", true)
 
-	if not prompt then
-		local targetPart = foodModel:IsA("Model")
-			and (foodModel.PrimaryPart or foodModel:FindFirstChildWhichIsA("BasePart"))
-			or foodModel
+--	if not prompt then
+--		local targetPart = foodModel:IsA("Model")
+--			and (foodModel.PrimaryPart or foodModel:FindFirstChildWhichIsA("BasePart"))
+--			or foodModel
 
-		if targetPart then
-			prompt = Instance.new("ProximityPrompt")
-			prompt.ActionText = "Eat"
-			prompt.ObjectText = foodModel.Name
-			prompt.HoldDuration = 0.5
-			prompt.MaxActivationDistance = 8
-			prompt.Parent = targetPart
-		end
-	end
+--		if targetPart then
+--			prompt = Instance.new("ProximityPrompt")
+--			prompt.ActionText = "Eat"
+--			prompt.ObjectText = foodModel.Name
+--			prompt.HoldDuration = 0.5
+--			prompt.MaxActivationDistance = 8
+--			prompt.Parent = targetPart
+--		end
+--	end
 
-	if prompt then
-		local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-		local RE_EatFood = Remotes:WaitForChild("EatFood")
+--	if prompt then
+--		local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+--		local RE_EatFood = Remotes:WaitForChild("EatFood")
 
-		prompt.Triggered:Connect(function(player)
-			RE_EatFood:FireServer()
-			foodModel:Destroy() -- food item habis sekali pakai
-		end)
-	end
-end
+--		prompt.Triggered:Connect(function(player)
+--			RE_EatFood:FireServer()
+--			foodModel:Destroy() -- food item habis sekali pakai
+--		end)
+--	end
+--end
 
 local function placeFoodItems(grid, hallInfo)
 	if #FoodOptions == 0 then
@@ -1199,7 +1199,8 @@ local function placeFoodItems(grid, hallInfo)
 					false
 				)
 
-				hookFoodItem(clone)
+				--hookFoodItem(clone)
+				clone:SetAttribute("ItemCategory", "food")
 				markOccupied(col, row)
 			end
 		end
