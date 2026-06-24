@@ -69,7 +69,9 @@ local CEILING_Y_OFFSET = Constants.WALL_HEIGHT - 8
 local FLOOR_SCALE = TILE_SIZE / 4.025826454162598 -- ≈ 1.991
 local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ketebalan HASIL scale)
 
-local PROP_SCALE = 3
+local PROP_SCALE = 1.5
+local COAL_SCALE = 2
+local LEVER_SCALE = 5
 local FIREPLACE_SCALE = 4
 local CONVEYOR_SCALE = 4
 local LANTERN_SCALE = 2
@@ -81,9 +83,9 @@ local SIDE_BRANCH_CHANCE = 0.85
 local SIDE_BRANCH_MIN_LENGTH = 3
 local SIDE_BRANCH_MAX_LENGTH = 5
 
-local PROP_CHANCE = 0.18
-local RUBBLE_CHANCE = 0.22
-local SHORT_WALL_CHANCE = 0.12
+local PROP_CHANCE = 0.45
+local BOULDERLARGE_CHANCE = 0.50
+--local SHORT_WALL_CHANCE = 0.12
 local FOOD_CHANCE = 0.08 -- chance per tile floor biasa muncul food item
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
@@ -157,9 +159,9 @@ local FoodItemsFolder = MapPieces:WaitForChild("FoodItems")
 
 local WallStraight = WallsFolder:WaitForChild("wall_straight")
 local WallCorner = WallsFolder:FindFirstChild("wall_corner_90")
-local WallEndCap = WallsFolder:FindFirstChild("wall_end_cap")
-local WallPillar = WallsFolder:FindFirstChild("wall_pillar")
-local WallShort = WallsFolder:FindFirstChild("wall_short")
+-- local WallEndCap = WallsFolder:FindFirstChild("wall_end_cap")
+-- local WallPillar = WallsFolder:FindFirstChild("wall_pillar")
+-- local WallShort = WallsFolder:FindFirstChild("wall_short")
 
 local CeilingFlat = CeilingsFolder:WaitForChild("ceiling_flat")
 local CeilingArch = CeilingsFolder:FindFirstChild("ceiling_arch")
@@ -217,6 +219,9 @@ if BoulderMedium then
 end
 if BoulderLarge then
 	table.insert(BoulderOptions, BoulderLarge)
+end
+if FloorRubble then
+	table.insert(BoulderOptions, FloorRubble)
 end
 
 local CeilingOptions = { CeilingFlat }
@@ -509,10 +514,10 @@ local function placeWall(mapFolder, col, row, dirName)
 	local selectedWall = WallStraight
 	local scale = WALL_SCALE
 
-	if WallShort and math.random() < SHORT_WALL_CHANCE then
-		selectedWall = WallShort
-		scale = WALL_SCALE
-	end
+	--if WallShort and math.random() < SHORT_WALL_CHANCE then
+	--	selectedWall = WallShort
+	--	scale = WALL_SCALE
+	--end
 
 	local wallClone = cloneAsset(
 		selectedWall,
@@ -539,7 +544,8 @@ local function placeWall(mapFolder, col, row, dirName)
 		for _, part in ipairs(wallClone:GetDescendants()) do
 			if part:IsA("BasePart") then
 				local oldSize = part.Size
-				part.Size = Vector3.new(oldSize.X, oldSize.Y * heightScaleFactor, oldSize.Z)
+				local WALL_OVERLAP = 0.15
+				part.Size = Vector3.new(oldSize.X + WALL_OVERLAP, oldSize.Y * heightScaleFactor, oldSize.Z + WALL_OVERLAP)
 			end
 		end
 
@@ -605,10 +611,27 @@ local function placeFloor(mapFolder, col, row, tileType, hallInfo)
 	local clone = cloneAsset(
 		selectedFloor,
 		mapFolder,
-		CFrame.new(pos),
+		CFrame.new(pos + Vector3.new(0, FLOOR_THICKNESS / 2, 0)),
 		FLOOR_SCALE, -- pakai scale yang sama dengan ceiling, karena ini hasil duplikat ceiling
-		false
+		true
 	)
+
+	-- Setelah cloneAsset, besarkan sedikit supaya tepi-tepi antar tile saling
+	-- overlap dan tidak ada celah visual
+	if clone then
+		-- Tambah TILE_OVERLAP ke X dan Z supaya gap antar tile tertutup
+		-- Y (ketebalan) tidak perlu diubah
+		local TILE_OVERLAP = 0.15 -- stud, sesuaikan kalau masih ada celah
+		for _, part in ipairs(clone:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Size = Vector3.new(
+					part.Size.X + TILE_OVERLAP,
+					part.Size.Y,
+					part.Size.Z + TILE_OVERLAP
+				)
+			end
+		end
+	end
 
 	-- Pewarnaan khusus per tile type (spawn/conveyor/fireplace) --
 	-- TIDAK BISA lagi pakai .Color kalau asset floor pakai banyak
@@ -633,7 +656,7 @@ local function placeCeiling(mapFolder, col, row, tileType)
 
 	local ceilingPos = basePos + Vector3.new(0, CEILING_Y_OFFSET, 0)
 
-	cloneAsset(selectedCeiling, mapFolder, CFrame.new(ceilingPos), CEILING_SCALE, false)
+	cloneAsset(selectedCeiling, mapFolder, CFrame.new(ceilingPos), CEILING_SCALE, true)
 end
 
 local function createConveyorZone(mapFolder, col, row, hallInfo)
@@ -686,16 +709,16 @@ local function placeConveyorVisual(mapFolder, col, row, hallInfo)
 	local basePos = gridToWorld(col, row)
 
 	if ConveyorAsset then
-		cloneAsset(ConveyorAsset, mapFolder, CFrame.new(basePos + Vector3.new(0, 0.75, 0)), CONVEYOR_SCALE, false)
+		cloneAsset(ConveyorAsset, mapFolder, CFrame.new(basePos + Vector3.new(0, 0.75 + 0.75, 0)), CONVEYOR_SCALE, true)
 	else
 		local conveyor = createPart(
 			"Conveyor_Visual",
 			Vector3.new(TILE_SIZE * 0.75, 0.2, TILE_SIZE * 0.95),
-			CFrame.new(basePos + Vector3.new(0, 0.65, 0)),
+			CFrame.new(basePos + Vector3.new(0, 0.65 + 0.75, 0)),
 			Color3.fromRGB(50, 70, 110),
 			Enum.Material.Metal
 		)
-		conveyor.CanCollide = false
+		conveyor.CanCollide = true
 		conveyor.Parent = mapFolder
 	end
 
@@ -759,27 +782,40 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 
 	local basePos = gridToWorld(col, row)
 
-	if FloorRubble and math.random() < RUBBLE_CHANCE then
+	if boulder_large and math.random() < BOULDERLARGE then
 		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
 		cloneAsset(
-			FloorRubble,
+			BoulderLarge,
 			mapFolder,
-			CFrame.new(basePos + offset + Vector3.new(0, 0.5, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			2,
-			false
+			true
 		)
 	end
 
 	if #BoulderOptions > 0 and math.random() < PROP_CHANCE then
-		local selected = BoulderOptions[math.random(1, #BoulderOptions)]
-		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
-		cloneAsset(
-			selected,
-			mapFolder,
-			CFrame.new(basePos + offset + Vector3.new(0, 2, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-			PROP_SCALE,
-			true
-		)
+		-- Spawn 2-3 prop per tile (acak)
+		local propCount = math.random(2, 3)
+		for _ = 1, propCount do
+			local selected = BoulderOptions[math.random(1, #BoulderOptions)]
+			-- Tiap prop dapat offset acak SENDIRI supaya tidak numpuk
+			-- persis di titik yang sama. Pakai safe margin yang lebih
+			-- kecil (2 stud) supaya masih dalam 1 tile meski ada beberapa.
+			local offsetX = math.random(-2, 2)
+			local offsetZ = math.random(-2, 2)
+			cloneAsset(
+				selected,
+				mapFolder,
+				CFrame.new(basePos + Vector3.new(offsetX, FLOOR_THICKNESS, offsetZ))
+					* CFrame.Angles(
+						0,
+						math.rad(math.random(0, 359)),
+						0
+					),
+				PROP_SCALE,
+				true
+			)
+		end
 	end
 end
 
@@ -890,8 +926,8 @@ local function placeCoalObjects(taskFolder, placeableTiles, level)
 		local clone = cloneAsset(
 			selected,
 			taskFolder,
-			CFrame.new(basePos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-			1,
+			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			COAL_SCALE,
 			true
 		)
 
@@ -922,8 +958,8 @@ local function placeLeverObjects(taskFolder, placeableTiles, level)
 		local clone = cloneAsset(
 			LeverAsset,
 			taskFolder,
-			CFrame.new(basePos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-			1,
+			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			LEVER_SCALE,
 			true
 		)
 
@@ -1195,7 +1231,7 @@ local function placeFoodItems(grid, hallInfo)
 				local clone = cloneAsset(
 					selected,
 					foodFolder,
-					CFrame.new(basePos + offset + Vector3.new(0, 1, 0))
+					CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
 						* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 					1,
 					false
@@ -1215,6 +1251,31 @@ end
 -- ============================================================
 -- SPAWN
 -- ============================================================
+
+local function updateSpawnLocation(hallInfo)
+    -- Cari SpawnLocation yang sudah ada di Workspace (bukan di dalam
+    -- GeneratedMap folder), pindahkan ke posisi spawn map yang benar.
+    -- Kalau tidak ada, buat baru.
+    local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow)
+
+    local spawnLocation = Workspace:FindFirstChildOfClass("SpawnLocation")
+    if not spawnLocation then
+        spawnLocation = Instance.new("SpawnLocation")
+        spawnLocation.Size = Vector3.new(TILE_SIZE, 1, TILE_SIZE)
+        spawnLocation.Anchored = true
+        spawnLocation.CanCollide = true
+        spawnLocation.Transparency = 1 -- tidak terlihat
+        spawnLocation.Name = "MapSpawnLocation"
+        spawnLocation.Parent = Workspace
+    end
+
+    -- Taruh di permukaan floor (Y = ketebalan floor)
+    spawnLocation.CFrame = CFrame.new(
+        spawnPos.X,
+        FLOOR_THICKNESS,
+        spawnPos.Z
+    )
+end
 
 local function movePlayersToSpawn(hallInfo)
 	local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow) + Vector3.new(0, 5, 0)
@@ -1271,6 +1332,7 @@ function MapGenerator.generateMap(level: number?)
 	end
 
 	local grid, hallInfo = buildLayout()
+	updateSpawnLocation(hallInfo)
 
 	-- ── Lantern DULU (sebelum dark zone, supaya litTiles ke-set) ──
 	placeLanterns(mapFolder, grid, hallInfo)
@@ -1364,6 +1426,6 @@ end
 -- ============================================================
 
 task.wait(2)
-MapGenerator.generateMap(1)
+MapGenerator.generateMap(level==10)
 
 return MapGenerator

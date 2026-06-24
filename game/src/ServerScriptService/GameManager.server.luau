@@ -114,7 +114,7 @@ local function getSessionData(): {level: number, rules: {string}, mode: string}
 
     -- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
     -- TODO: ganti level di sini untuk testing manual level berapa pun
-    local level = 1
+    local level = 10
 
     return {
         level = level,
