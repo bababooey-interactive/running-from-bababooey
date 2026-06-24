@@ -1,7 +1,22 @@
 -- =============================================================
---  SurvivalUI.client.luau
---  Client-side HUD: Hunger bar, Darkness timer, Task counter
---  Path: game/src/StarterPlayerScripts/SurvivalUI.client.luau
+--  SurvivalUI.client.luau  (v2 — Redesign sesuai sketsa)
+--  Path: game/src/StarterPlayer/StarterCharacterScripts/SurvivalUI.client.luau
+--
+--  Layout:
+--  ┌─[Roblox]──────────────────────────────[Task Counter]─────┐
+--  │                                        [Rules Button]     │
+--  │                                                     [←]  │
+--  │              [Rules Panel — opsional terbuka]             │
+--  │                                                           │
+--  │  [Hunger ████░░]                                         │
+--  │  [Dark   ████░░]                                         │
+--  └───────────────────────────────────────────────────────────┘
+--
+--  Menggantikan SurvivalUI.client.luau lama DAN menyerap fungsi
+--  RuleDisplay.client.luau — cukup satu script HUD terpadu.
+--  RuleDisplay.client.luau bisa dihapus atau dibiarkan (tidak
+--  konflik karena script ini pakai ScreenGui nama berbeda,
+--  "GameHUD" vs "RulesDisplayGui" lama).
 -- =============================================================
 
 local Players           = game:GetService("Players")
@@ -17,307 +32,695 @@ local RE_TaskProgress = Remotes:WaitForChild("TaskProgress")
 local RE_SyncState    = Remotes:WaitForChild("SyncState")
 local RE_GameWin      = Remotes:WaitForChild("GameWin")
 local RE_PlayerDied   = Remotes:WaitForChild("PlayerDied")
+local RE_RulesActivated = Remotes:WaitForChild("RulesActivated")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ─────────────────────────────────────────────
---  Build GUI
+--  WARNA & STYLE (horror dungeon palette)
+-- ─────────────────────────────────────────────
+local C = {
+	BG_DARK     = Color3.fromRGB(14, 14, 18),
+	BG_MID      = Color3.fromRGB(22, 22, 28),
+	BG_PANEL    = Color3.fromRGB(18, 18, 24),
+	ACCENT_RED  = Color3.fromRGB(180, 45, 45),
+	ACCENT_ORG  = Color3.fromRGB(220, 120, 40),
+	TEXT_WHITE  = Color3.fromRGB(235, 235, 235),
+	TEXT_DIM    = Color3.fromRGB(150, 150, 160),
+	TEXT_WARN   = Color3.fromRGB(255, 200, 80),
+	MONSTER_CLR = Color3.fromRGB(220, 80, 60),
+	PLAYER_CLR  = Color3.fromRGB(90, 160, 255),
+	BAR_HUNGER  = Color3.fromRGB(200, 140, 40),
+	BAR_DARK    = Color3.fromRGB(100, 60, 200),
+	BAR_BG      = Color3.fromRGB(35, 35, 42),
+	BORDER      = Color3.fromRGB(60, 60, 75),
+	WIN_GREEN   = Color3.fromRGB(80, 210, 120),
+	DEATH_RED   = Color3.fromRGB(220, 60, 60),
+}
+
+-- ─────────────────────────────────────────────
+--  BUILD GUI
 -- ─────────────────────────────────────────────
 local function buildGui()
-    -- Hapus GUI lama jika ada
-    if PlayerGui:FindFirstChild("SurvivalHUD") then
-        PlayerGui:FindFirstChild("SurvivalHUD"):Destroy()
-    end
+	if PlayerGui:FindFirstChild("GameHUD") then
+		PlayerGui:FindFirstChild("GameHUD"):Destroy()
+	end
 
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name            = "SurvivalHUD"
-    screenGui.ResetOnSpawn    = false
-    screenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
-    screenGui.Parent          = PlayerGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name           = "GameHUD"
+	screenGui.ResetOnSpawn   = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.IgnoreGuiInset = false
+	screenGui.Parent         = PlayerGui
 
-    -- ── TASK COUNTER (top-center) ────────────────
-    local taskFrame = Instance.new("Frame")
-    taskFrame.Name            = "TaskFrame"
-    taskFrame.Size            = UDim2.new(0, 320, 0, 80)
-    taskFrame.Position        = UDim2.new(0.5, -160, 0, 12)
-    taskFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    taskFrame.BackgroundTransparency = 0.45
-    taskFrame.BorderSizePixel = 0
-    taskFrame.Parent          = screenGui
+	-- ═══════════════════════════════════════════
+	--  A. KANAN ATAS — Task Counter + Rules Button
+	-- ═══════════════════════════════════════════
 
-    local taskCorner = Instance.new("UICorner")
-    taskCorner.CornerRadius = UDim.new(0, 8)
-    taskCorner.Parent = taskFrame
+	local topRight = Instance.new("Frame")
+	topRight.Name                   = "TopRight"
+	topRight.AnchorPoint             = Vector2.new(1, 0)
+	topRight.Position                = UDim2.new(1, -12, 0, 12)
+	topRight.Size                    = UDim2.new(0, 280, 0, 88)
+	topRight.BackgroundTransparency  = 1
+	topRight.Parent                  = screenGui
 
-    local taskLabel = Instance.new("TextLabel")
-    taskLabel.Name             = "TaskLabel"
-    taskLabel.Size             = UDim2.new(1, -16, 1, 0)
-    taskLabel.Position         = UDim2.new(0, 8, 0, 0)
-    taskLabel.BackgroundTransparency = 1
-    taskLabel.TextColor3       = Color3.fromRGB(255, 255, 255)
-    taskLabel.TextSize         = 14
-    taskLabel.Font             = Enum.Font.GothamBold
-    taskLabel.TextXAlignment   = Enum.TextXAlignment.Left
-    taskLabel.TextYAlignment   = Enum.TextYAlignment.Center
-    taskLabel.RichText         = true
-    taskLabel.Text             = "🪨 Coal: 0/0  |  🔧 Lever: 0/0  |  🔋 Battery: 0/0"
-    taskLabel.Parent           = taskFrame
+	local topRightLayout = Instance.new("UIListLayout")
+	topRightLayout.FillDirection     = Enum.FillDirection.Vertical
+	topRightLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	topRightLayout.Padding           = UDim.new(0, 6)
+	topRightLayout.SortOrder         = Enum.SortOrder.LayoutOrder
+	topRightLayout.Parent            = topRight
 
-    -- ── HUNGER BAR (bottom-left) ─────────────────
-    local hungerContainer = Instance.new("Frame")
-    hungerContainer.Name   = "HungerContainer"
-    hungerContainer.Size   = UDim2.new(0, 220, 0, 54)
-    hungerContainer.Position = UDim2.new(0, 16, 1, -70)
-    hungerContainer.BackgroundTransparency = 1
-    hungerContainer.Visible = false
-    hungerContainer.Parent  = screenGui
+	-- ── Task Counter box ──────────────────────
+	local taskBox = Instance.new("Frame")
+	taskBox.Name                  = "TaskBox"
+	taskBox.Size                  = UDim2.new(1, 0, 0, 44)
+	taskBox.BackgroundColor3      = C.BG_DARK
+	taskBox.BackgroundTransparency = 0.25
+	taskBox.BorderSizePixel        = 0
+	taskBox.LayoutOrder            = 1
+	taskBox.Parent                 = topRight
 
-    local hungerIcon = Instance.new("TextLabel")
-    hungerIcon.Size   = UDim2.new(0, 24, 0, 24)
-    hungerIcon.Position = UDim2.new(0, 0, 0, 0)
-    hungerIcon.BackgroundTransparency = 1
-    hungerIcon.TextColor3 = Color3.fromRGB(255, 200, 100)
-    hungerIcon.TextSize   = 18
-    hungerIcon.Font       = Enum.Font.GothamBold
-    hungerIcon.Text       = "🍖"
-    hungerIcon.Parent     = hungerContainer
+	local taskBoxCorner = Instance.new("UICorner")
+	taskBoxCorner.CornerRadius = UDim.new(0, 8)
+	taskBoxCorner.Parent       = taskBox
 
-    local hungerText = Instance.new("TextLabel")
-    hungerText.Name   = "HungerText"
-    hungerText.Size   = UDim2.new(1, -30, 0, 16)
-    hungerText.Position = UDim2.new(0, 28, 0, 4)
-    hungerText.BackgroundTransparency = 1
-    hungerText.TextColor3 = Color3.fromRGB(220, 220, 220)
-    hungerText.TextSize   = 12
-    hungerText.Font       = Enum.Font.Gotham
-    hungerText.TextXAlignment = Enum.TextXAlignment.Left
-    hungerText.Text       = "Hunger"
-    hungerText.Parent     = hungerContainer
+	local taskBoxStroke = Instance.new("UIStroke")
+	taskBoxStroke.Color     = C.BORDER
+	taskBoxStroke.Thickness  = 1
+	taskBoxStroke.Parent     = taskBox
 
-    local hungerBg = Instance.new("Frame")
-    hungerBg.Name   = "HungerBg"
-    hungerBg.Size   = UDim2.new(1, 0, 0, 18)
-    hungerBg.Position = UDim2.new(0, 0, 0, 28)
-    hungerBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    hungerBg.BorderSizePixel  = 0
-    hungerBg.Parent = hungerContainer
+	local taskPad = Instance.new("UIPadding")
+	taskPad.PaddingLeft   = UDim.new(0, 12)
+	taskPad.PaddingRight  = UDim.new(0, 12)
+	taskPad.PaddingTop    = UDim.new(0, 6)
+	taskPad.PaddingBottom = UDim.new(0, 6)
+	taskPad.Parent        = taskBox
 
-    local hungerBgCorner = Instance.new("UICorner")
-    hungerBgCorner.CornerRadius = UDim.new(0, 5)
-    hungerBgCorner.Parent = hungerBg
+	local taskLabel = Instance.new("TextLabel")
+	taskLabel.Name                  = "TaskLabel"
+	taskLabel.Size                  = UDim2.new(1, 0, 1, 0)
+	taskLabel.BackgroundTransparency = 1
+	taskLabel.TextColor3             = C.TEXT_WHITE
+	taskLabel.TextSize               = 13
+	taskLabel.Font                   = Enum.Font.GothamBold
+	taskLabel.TextXAlignment         = Enum.TextXAlignment.Right
+	taskLabel.TextYAlignment         = Enum.TextYAlignment.Center
+	taskLabel.RichText               = true
+	taskLabel.Text                   = "🪨 <font color='#aaaaaa'>0/0</font>  🔧 <font color='#aaaaaa'>0/0</font>  🔋 <font color='#aaaaaa'>0/0</font>"
+	taskLabel.Parent                 = taskBox
 
-    local hungerFill = Instance.new("Frame")
-    hungerFill.Name   = "HungerFill"
-    hungerFill.Size   = UDim2.new(1, 0, 1, 0)
-    hungerFill.Position = UDim2.new(0, 0, 0, 0)
-    hungerFill.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
-    hungerFill.BorderSizePixel  = 0
-    hungerFill.Parent = hungerBg
+	-- ── Rules toggle button ───────────────────
+	local rulesBtn = Instance.new("TextButton")
+	rulesBtn.Name                  = "RulesBtn"
+	rulesBtn.Size                  = UDim2.new(1, 0, 0, 32)
+	rulesBtn.BackgroundColor3      = C.BG_MID
+	rulesBtn.BackgroundTransparency = 0.2
+	rulesBtn.BorderSizePixel        = 0
+	rulesBtn.Font                   = Enum.Font.GothamBold
+	rulesBtn.TextSize               = 12
+	rulesBtn.TextColor3             = C.TEXT_DIM
+	rulesBtn.Text                   = "▼  RULES AKTIF"
+	rulesBtn.LayoutOrder            = 2
+	rulesBtn.AutoButtonColor        = false
+	rulesBtn.Parent                 = topRight
 
-    local hungerFillCorner = Instance.new("UICorner")
-    hungerFillCorner.CornerRadius = UDim.new(0, 5)
-    hungerFillCorner.Parent = hungerFill
+	local rulesBtnCorner = Instance.new("UICorner")
+	rulesBtnCorner.CornerRadius = UDim.new(0, 8)
+	rulesBtnCorner.Parent       = rulesBtn
 
-    -- ── DARK TIMER (bottom-left, atas hunger) ────
-    local darkContainer = Instance.new("Frame")
-    darkContainer.Name   = "DarkContainer"
-    darkContainer.Size   = UDim2.new(0, 220, 0, 54)
-    darkContainer.Position = UDim2.new(0, 16, 1, -130)
-    darkContainer.BackgroundTransparency = 1
-    darkContainer.Visible = false
-    darkContainer.Parent  = screenGui
+	local rulesBtnStroke = Instance.new("UIStroke")
+	rulesBtnStroke.Color     = C.BORDER
+	rulesBtnStroke.Thickness  = 1
+	rulesBtnStroke.Parent     = rulesBtn
 
-    local darkIcon = Instance.new("TextLabel")
-    darkIcon.Size   = UDim2.new(0, 24, 0, 24)
-    darkIcon.Position = UDim2.new(0, 0, 0, 0)
-    darkIcon.BackgroundTransparency = 1
-    darkIcon.TextColor3 = Color3.fromRGB(150, 100, 255)
-    darkIcon.TextSize   = 18
-    darkIcon.Font       = Enum.Font.GothamBold
-    darkIcon.Text       = "🌑"
-    darkIcon.Parent     = darkContainer
+	-- ═══════════════════════════════════════════
+	--  B. PANEL RULES (tengah, slide in/out)
+	-- ═══════════════════════════════════════════
 
-    local darkText = Instance.new("TextLabel")
-    darkText.Name   = "DarkText"
-    darkText.Size   = UDim2.new(1, -30, 0, 16)
-    darkText.Position = UDim2.new(0, 28, 0, 4)
-    darkText.BackgroundTransparency = 1
-    darkText.TextColor3 = Color3.fromRGB(220, 220, 220)
-    darkText.TextSize   = 12
-    darkText.Font       = Enum.Font.Gotham
-    darkText.TextXAlignment = Enum.TextXAlignment.Left
-    darkText.Text       = "Get to the light!"
-    darkText.Parent     = darkContainer
+	local rulesPanel = Instance.new("Frame")
+	rulesPanel.Name                   = "RulesPanel"
+	rulesPanel.AnchorPoint             = Vector2.new(0.5, 0.5)
+	rulesPanel.Position                = UDim2.new(0.5, 0, 0.5, 0)
+	rulesPanel.Size                    = UDim2.new(0, 480, 0, 300)
+	rulesPanel.BackgroundColor3        = C.BG_PANEL
+	rulesPanel.BackgroundTransparency  = 0.08
+	rulesPanel.BorderSizePixel         = 0
+	rulesPanel.Visible                 = false
+	rulesPanel.ZIndex                  = 15
+	rulesPanel.Parent                  = screenGui
 
-    local darkBg = Instance.new("Frame")
-    darkBg.Name   = "DarkBg"
-    darkBg.Size   = UDim2.new(1, 0, 0, 18)
-    darkBg.Position = UDim2.new(0, 0, 0, 28)
-    darkBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    darkBg.BorderSizePixel  = 0
-    darkBg.Parent = darkContainer
+	local rulesPanelCorner = Instance.new("UICorner")
+	rulesPanelCorner.CornerRadius = UDim.new(0, 12)
+	rulesPanelCorner.Parent       = rulesPanel
 
-    local darkBgCorner = Instance.new("UICorner")
-    darkBgCorner.CornerRadius = UDim.new(0, 5)
-    darkBgCorner.Parent = darkBg
+	local rulesPanelStroke = Instance.new("UIStroke")
+	rulesPanelStroke.Color     = C.ACCENT_RED
+	rulesPanelStroke.Thickness  = 1.5
+	rulesPanelStroke.Parent     = rulesPanel
 
-    local darkFill = Instance.new("Frame")
-    darkFill.Name   = "DarkFill"
-    darkFill.Size   = UDim2.new(1, 0, 1, 0)
-    darkFill.Position = UDim2.new(0, 0, 0, 0)
-    darkFill.BackgroundColor3 = Color3.fromRGB(100, 60, 200)
-    darkFill.BorderSizePixel  = 0
-    darkFill.Parent = darkBg
+	-- Header panel
+	local panelHeader = Instance.new("Frame")
+	panelHeader.Name                  = "PanelHeader"
+	panelHeader.Size                  = UDim2.new(1, 0, 0, 40)
+	panelHeader.BackgroundColor3      = C.ACCENT_RED
+	panelHeader.BackgroundTransparency = 0.4
+	panelHeader.BorderSizePixel        = 0
+	panelHeader.ZIndex                 = 16
+	panelHeader.Parent                 = rulesPanel
 
-    local darkFillCorner = Instance.new("UICorner")
-    darkFillCorner.CornerRadius = UDim.new(0, 5)
-    darkFillCorner.Parent = darkFill
+	local panelHeaderCorner = Instance.new("UICorner")
+	panelHeaderCorner.CornerRadius = UDim.new(0, 12)
+	panelHeaderCorner.Parent       = panelHeader
 
-    -- ── DARKNESS VIGNETTE OVERLAY ─────────────────
-    local darkOverlay = Instance.new("Frame")
-    darkOverlay.Name   = "DarkOverlay"
-    darkOverlay.Size   = UDim2.new(1, 0, 1, 0)
-    darkOverlay.Position = UDim2.new(0, 0, 0, 0)
-    darkOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    darkOverlay.BackgroundTransparency = 1  -- mulai transparan
-    darkOverlay.BorderSizePixel = 0
-    darkOverlay.ZIndex = 10
-    darkOverlay.Parent = screenGui
+	-- Fix corner bawah header (rounded semua sisi, block bawah)
+	local headerFix = Instance.new("Frame")
+	headerFix.Size                 = UDim2.new(1, 0, 0.5, 0)
+	headerFix.Position             = UDim2.new(0, 0, 0.5, 0)
+	headerFix.BackgroundColor3     = C.ACCENT_RED
+	headerFix.BackgroundTransparency = 0.4
+	headerFix.BorderSizePixel      = 0
+	headerFix.ZIndex               = 16
+	headerFix.Parent               = panelHeader
 
-    -- ── WIN / DEATH OVERLAY ───────────────────────
-    local messageOverlay = Instance.new("Frame")
-    messageOverlay.Name   = "MessageOverlay"
-    messageOverlay.Size   = UDim2.new(1, 0, 1, 0)
-    messageOverlay.Position = UDim2.new(0, 0, 0, 0)
-    messageOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    messageOverlay.BackgroundTransparency = 1
-    messageOverlay.BorderSizePixel = 0
-    messageOverlay.ZIndex = 20
-    messageOverlay.Visible = false
-    messageOverlay.Parent = screenGui
+	local panelTitle = Instance.new("TextLabel")
+	panelTitle.Name                  = "PanelTitle"
+	panelTitle.Size                  = UDim2.new(1, -48, 1, 0)
+	panelTitle.Position              = UDim2.new(0, 16, 0, 0)
+	panelTitle.BackgroundTransparency = 1
+	panelTitle.TextColor3             = C.TEXT_WHITE
+	panelTitle.TextSize               = 15
+	panelTitle.Font                   = Enum.Font.GothamBold
+	panelTitle.TextXAlignment         = Enum.TextXAlignment.Left
+	panelTitle.TextYAlignment         = Enum.TextYAlignment.Center
+	panelTitle.Text                   = "⚠  RULES AKTIF SESI INI"
+	panelTitle.ZIndex                 = 17
+	panelTitle.Parent                 = panelHeader
 
-    local messageLabel = Instance.new("TextLabel")
-    messageLabel.Name   = "MessageLabel"
-    messageLabel.Size   = UDim2.new(0.6, 0, 0, 80)
-    messageLabel.Position = UDim2.new(0.2, 0, 0.4, 0)
-    messageLabel.BackgroundTransparency = 1
-    messageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    messageLabel.TextSize   = 36
-    messageLabel.Font       = Enum.Font.GothamBold
-    messageLabel.Text       = ""
-    messageLabel.TextScaled = true
-    messageLabel.RichText   = true
-    messageLabel.Parent     = messageOverlay
+	-- Close button panel (panah kanan sesuai sketsa)
+	local panelClose = Instance.new("TextButton")
+	panelClose.Name                  = "PanelClose"
+	panelClose.AnchorPoint            = Vector2.new(1, 0.5)
+	panelClose.Position               = UDim2.new(1, -10, 0.5, 0)
+	panelClose.Size                   = UDim2.new(0, 28, 0, 28)
+	panelClose.BackgroundColor3       = C.BG_DARK
+	panelClose.BackgroundTransparency = 0.3
+	panelClose.BorderSizePixel        = 0
+	panelClose.Font                   = Enum.Font.GothamBold
+	panelClose.TextSize               = 16
+	panelClose.TextColor3             = C.TEXT_WHITE
+	panelClose.Text                   = "→"
+	panelClose.ZIndex                 = 18
+	panelClose.AutoButtonColor        = false
+	panelClose.Parent                 = panelHeader
 
-    return {
-        taskLabel      = taskLabel,
-        hungerContainer = hungerContainer,
-        hungerFill     = hungerFill,
-        hungerText     = hungerText,
-        darkContainer  = darkContainer,
-        darkFill       = darkFill,
-        darkText       = darkText,
-        darkOverlay    = darkOverlay,
-        messageOverlay = messageOverlay,
-        messageLabel   = messageLabel,
-    }
+	local panelCloseCorner = Instance.new("UICorner")
+	panelCloseCorner.CornerRadius = UDim.new(1, 0)
+	panelCloseCorner.Parent       = panelClose
+
+	-- Body panel: 2 kolom (Monster | Player)
+	local panelBody = Instance.new("Frame")
+	panelBody.Name                  = "PanelBody"
+	panelBody.Position              = UDim2.new(0, 0, 0, 40)
+	panelBody.Size                  = UDim2.new(1, 0, 1, -40)
+	panelBody.BackgroundTransparency = 1
+	panelBody.ZIndex                = 16
+	panelBody.Parent                = rulesPanel
+
+	local bodyPad = Instance.new("UIPadding")
+	bodyPad.PaddingLeft   = UDim.new(0, 16)
+	bodyPad.PaddingRight  = UDim.new(0, 16)
+	bodyPad.PaddingTop    = UDim.new(0, 12)
+	bodyPad.PaddingBottom = UDim.new(0, 12)
+	bodyPad.Parent        = panelBody
+
+	-- Divider tengah
+	local divider = Instance.new("Frame")
+	divider.Name                 = "Divider"
+	divider.AnchorPoint           = Vector2.new(0.5, 0)
+	divider.Position              = UDim2.new(0.5, 0, 0, 0)
+	divider.Size                  = UDim2.new(0, 1, 1, -16)
+	divider.BackgroundColor3      = C.BORDER
+	divider.BorderSizePixel        = 0
+	divider.ZIndex                = 16
+	divider.Parent                = panelBody
+
+	-- Kolom Monster (kiri)
+	local monsterCol = Instance.new("Frame")
+	monsterCol.Name                  = "MonsterCol"
+	monsterCol.Position              = UDim2.new(0, 0, 0, 0)
+	monsterCol.Size                  = UDim2.new(0.5, -8, 1, 0)
+	monsterCol.BackgroundTransparency = 1
+	monsterCol.ZIndex                = 16
+	monsterCol.Parent                = panelBody
+
+	local monsterColLayout = Instance.new("UIListLayout")
+	monsterColLayout.Padding   = UDim.new(0, 4)
+	monsterColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	monsterColLayout.Parent    = monsterCol
+
+	local monsterHeader = Instance.new("TextLabel")
+	monsterHeader.Name                  = "Header"
+	monsterHeader.Size                  = UDim2.new(1, 0, 0, 22)
+	monsterHeader.BackgroundTransparency = 1
+	monsterHeader.TextColor3             = C.MONSTER_CLR
+	monsterHeader.TextSize               = 13
+	monsterHeader.Font                   = Enum.Font.GothamBold
+	monsterHeader.TextXAlignment         = Enum.TextXAlignment.Left
+	monsterHeader.Text                   = "MONSTER"
+	monsterHeader.LayoutOrder            = 0
+	monsterHeader.ZIndex                 = 17
+	monsterHeader.Parent                 = monsterCol
+
+	-- Kolom Player (kanan)
+	local playerCol = Instance.new("Frame")
+	playerCol.Name                  = "PlayerCol"
+	playerCol.Position              = UDim2.new(0.5, 8, 0, 0)
+	playerCol.Size                  = UDim2.new(0.5, -8, 1, 0)
+	playerCol.BackgroundTransparency = 1
+	playerCol.ZIndex                = 16
+	playerCol.Parent                = panelBody
+
+	local playerColLayout = Instance.new("UIListLayout")
+	playerColLayout.Padding   = UDim.new(0, 4)
+	playerColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	playerColLayout.Parent    = playerCol
+
+	local playerHeader = Instance.new("TextLabel")
+	playerHeader.Name                  = "Header"
+	playerHeader.Size                  = UDim2.new(1, 0, 0, 22)
+	playerHeader.BackgroundTransparency = 1
+	playerHeader.TextColor3             = C.PLAYER_CLR
+	playerHeader.TextSize               = 13
+	playerHeader.Font                   = Enum.Font.GothamBold
+	playerHeader.TextXAlignment         = Enum.TextXAlignment.Left
+	playerHeader.Text                   = "PLAYER"
+	playerHeader.LayoutOrder            = 0
+	playerHeader.ZIndex                 = 17
+	playerHeader.Parent                 = playerCol
+
+	-- ═══════════════════════════════════════════
+	--  C. KIRI BAWAH — Hunger + Darkness bars
+	-- ═══════════════════════════════════════════
+
+	local barsFrame = Instance.new("Frame")
+	barsFrame.Name                   = "BarsFrame"
+	barsFrame.AnchorPoint             = Vector2.new(0, 1)
+	barsFrame.Position                = UDim2.new(0, 12, 1, -12)
+	barsFrame.Size                    = UDim2.new(0, 200, 0, 56)
+	barsFrame.BackgroundTransparency  = 1
+	barsFrame.Parent                  = screenGui
+
+	local barsLayout = Instance.new("UIListLayout")
+	barsLayout.FillDirection     = Enum.FillDirection.Vertical
+	barsLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	barsLayout.Padding           = UDim.new(0, 5)
+	barsLayout.SortOrder         = Enum.SortOrder.LayoutOrder
+	barsLayout.Parent            = barsFrame
+
+	-- Fungsi helper buat satu bar row
+	local function makeBar(icon, barColor, layoutOrder, name)
+		local row = Instance.new("Frame")
+		row.Name                  = name
+		row.Size                  = UDim2.new(1, 0, 0, 22)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder            = layoutOrder
+		row.Visible                = false  -- hidden sampai rule aktif
+		row.Parent                 = barsFrame
+
+		local iconLabel = Instance.new("TextLabel")
+		iconLabel.Name                  = "Icon"
+		iconLabel.Size                  = UDim2.new(0, 20, 1, 0)
+		iconLabel.BackgroundTransparency = 1
+		iconLabel.TextColor3             = barColor
+		iconLabel.TextSize               = 14
+		iconLabel.Font                   = Enum.Font.GothamBold
+		iconLabel.Text                   = icon
+		iconLabel.TextYAlignment         = Enum.TextYAlignment.Center
+		iconLabel.Parent                 = row
+
+		local trackBg = Instance.new("Frame")
+		trackBg.Name                 = "Track"
+		trackBg.Position             = UDim2.new(0, 24, 0.5, -7)
+		trackBg.Size                 = UDim2.new(1, -24, 0, 14)
+		trackBg.BackgroundColor3     = C.BAR_BG
+		trackBg.BorderSizePixel      = 0
+		trackBg.Parent               = row
+
+		local trackCorner = Instance.new("UICorner")
+		trackCorner.CornerRadius = UDim.new(0, 4)
+		trackCorner.Parent       = trackBg
+
+		local fill = Instance.new("Frame")
+		fill.Name                = "Fill"
+		fill.Size                = UDim2.new(1, 0, 1, 0)
+		fill.BackgroundColor3    = barColor
+		fill.BorderSizePixel     = 0
+		fill.Parent              = trackBg
+
+		local fillCorner = Instance.new("UICorner")
+		fillCorner.CornerRadius = UDim.new(0, 4)
+		fillCorner.Parent       = fill
+
+		-- Teks overlay di dalam bar (nilai %)
+		local barText = Instance.new("TextLabel")
+		barText.Name                  = "BarText"
+		barText.Size                  = UDim2.new(1, 0, 1, 0)
+		barText.BackgroundTransparency = 1
+		barText.TextColor3             = C.TEXT_WHITE
+		barText.TextSize               = 10
+		barText.Font                   = Enum.Font.GothamBold
+		barText.Text                   = ""
+		barText.ZIndex                 = 2
+		barText.Parent                 = trackBg
+
+		return row, fill, barText
+	end
+
+	local hungerRow, hungerFill, hungerText = makeBar("🍖", C.BAR_HUNGER, 1, "HungerRow")
+	local darkRow,   darkFill,   darkText   = makeBar("🌑", C.BAR_DARK,   2, "DarkRow")
+
+	-- ═══════════════════════════════════════════
+	--  D. WIN / DEATH OVERLAY
+	-- ═══════════════════════════════════════════
+
+	local msgOverlay = Instance.new("Frame")
+	msgOverlay.Name                   = "MsgOverlay"
+	msgOverlay.Size                   = UDim2.new(1, 0, 1, 0)
+	msgOverlay.BackgroundColor3       = C.BG_DARK
+	msgOverlay.BackgroundTransparency = 1
+	msgOverlay.BorderSizePixel        = 0
+	msgOverlay.ZIndex                 = 25
+	msgOverlay.Visible                = false
+	msgOverlay.Parent                 = screenGui
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Name                   = "MsgLabel"
+	msgLabel.AnchorPoint             = Vector2.new(0.5, 0.5)
+	msgLabel.Position                = UDim2.new(0.5, 0, 0.45, 0)
+	msgLabel.Size                    = UDim2.new(0.55, 0, 0, 80)
+	msgLabel.BackgroundTransparency  = 1
+	msgLabel.TextColor3              = C.TEXT_WHITE
+	msgLabel.TextSize                = 34
+	msgLabel.Font                    = Enum.Font.GothamBold
+	msgLabel.TextScaled              = true
+	msgLabel.RichText                = true
+	msgLabel.ZIndex                  = 26
+	msgLabel.Parent                  = msgOverlay
+
+	return {
+		-- Task
+		taskLabel    = taskLabel,
+		-- Rules panel
+		rulesBtn     = rulesBtn,
+		rulesPanel   = rulesPanel,
+		panelClose   = panelClose,
+		monsterCol   = monsterCol,
+		playerCol    = playerCol,
+		-- Bars
+		hungerRow    = hungerRow,
+		hungerFill   = hungerFill,
+		hungerText   = hungerText,
+		darkRow      = darkRow,
+		darkFill     = darkFill,
+		darkText     = darkText,
+		-- Overlay
+		msgOverlay   = msgOverlay,
+		msgLabel     = msgLabel,
+	}
 end
 
 -- ─────────────────────────────────────────────
---  Update helpers
+--  RULES DISPLAY HELPERS
+-- ─────────────────────────────────────────────
+
+local RuleNames = {
+	[Constants.Rules.MONSTER_HEAR]      = { text = "Dapat Mendengar",         group = "monster" },
+	[Constants.Rules.MONSTER_SMELL]     = { text = "Dapat Mencium Bau",       group = "monster" },
+	[Constants.Rules.MONSTER_SEE]       = { text = "Dapat Melihat di Cahaya", group = "monster" },
+	[Constants.Rules.MONSTER_FAST]      = { text = "Lebih Cepat",             group = "monster" },
+	[Constants.Rules.MONSTER_REACH]     = { text = "Jangkauan Lebih Jauh",    group = "monster" },
+	[Constants.Rules.MONSTER_DUPLICATE] = { text = "Menduplikasi Diri",       group = "monster" },
+	[Constants.Rules.PLAYER_HUNGER]     = { text = "Lapar Seiring Waktu",     group = "player"  },
+	[Constants.Rules.PLAYER_DARK_TIMER] = { text = "Takut Kegelapan",         group = "player"  },
+}
+
+local function clearColEntries(col)
+	for _, child in ipairs(col:GetChildren()) do
+		if child:IsA("TextLabel") and child.Name == "RuleEntry" then
+			child:Destroy()
+		end
+	end
+end
+
+local function addColEntry(col, order, text, color)
+	local entry = Instance.new("TextLabel")
+	entry.Name                   = "RuleEntry"
+	entry.Size                   = UDim2.new(1, 0, 0, 20)
+	entry.BackgroundTransparency  = 1
+	entry.TextColor3              = color
+	entry.TextSize                = 13
+	entry.Font                    = Enum.Font.Gotham
+	entry.TextXAlignment          = Enum.TextXAlignment.Left
+	entry.Text                    = "• " .. text
+	entry.LayoutOrder             = order
+	entry.ZIndex                  = 17
+	entry.Parent                  = col
+end
+
+local function populateRulesPanel(ui, ruleIds)
+	clearColEntries(ui.monsterCol)
+	clearColEntries(ui.playerCol)
+
+	local monsterOrder, playerOrder = 1, 1
+	local hasMonster, hasPlayer = false, false
+
+	-- Hitung duplikat MONSTER_DUPLICATE untuk label "(x2)" dst.
+	local dupCount = 0
+	for _, id in ipairs(ruleIds) do
+		if id == Constants.Rules.MONSTER_DUPLICATE then
+			dupCount += 1
+		end
+	end
+
+	local seenDup = false
+
+	for _, id in ipairs(ruleIds) do
+		local info = RuleNames[id]
+		if not info then continue end
+
+		if id == Constants.Rules.MONSTER_DUPLICATE then
+			if seenDup then continue end  -- label hanya sekali, sudah ada "(x2/x4)"
+			seenDup = true
+			local label = info.text
+			if dupCount >= 2 then
+				label = label .. string.format(" (x%d)", 2 ^ dupCount)
+			end
+			addColEntry(ui.monsterCol, monsterOrder, label, C.MONSTER_CLR)
+			monsterOrder += 1
+			hasMonster = true
+		elseif info.group == "monster" then
+			addColEntry(ui.monsterCol, monsterOrder, info.text, C.TEXT_WHITE)
+			monsterOrder += 1
+			hasMonster = true
+		else
+			addColEntry(ui.playerCol, playerOrder, info.text, C.TEXT_WHITE)
+			playerOrder += 1
+			hasPlayer = true
+		end
+	end
+
+	if not hasMonster then
+		addColEntry(ui.monsterCol, 1, "— Tidak ada buff tambahan", C.TEXT_DIM)
+	end
+	if not hasPlayer then
+		addColEntry(ui.playerCol, 1, "— Tidak ada debuff tambahan", C.TEXT_DIM)
+	end
+end
+
+-- ─────────────────────────────────────────────
+--  UPDATE HELPERS
+-- ─────────────────────────────────────────────
+local function updateTaskLabel(ui, data)
+	local function fmt(icon, done, total)
+		local color = done >= total and "#50d080" or "#cccccc"
+		return string.format("%s <font color='%s'>%d/%d</font>", icon, color, done, total)
+	end
+	ui.taskLabel.Text =
+		fmt("🪨", data.coal_done,    data.coal_total)    .. "  " ..
+		fmt("🔧", data.lever_done,   data.lever_total)
+end
+
+local function updateHunger(ui, hunger)
+	ui.hungerRow.Visible = true
+	local ratio = math.clamp(hunger / Constants.HUNGER_MAX, 0, 1)
+
+	TweenService:Create(ui.hungerFill, TweenInfo.new(0.3), {
+		Size = UDim2.new(ratio, 0, 1, 0)
+	}):Play()
+
+	-- Warna: hijau → kuning → merah sesuai level
+	local r = math.clamp(2 * (1 - ratio), 0, 1)
+	local g = math.clamp(2 * ratio, 0, 1)
+	ui.hungerFill.BackgroundColor3 = Color3.new(r, g, 0)
+	ui.hungerText.Text = string.format("%d%%", math.floor(hunger))
+end
+
+local function updateDark(ui, timer, inDark)
+	ui.darkRow.Visible = true
+	local ratio = math.clamp(timer / Constants.DARK_TIMER_MAX, 0, 1)
+
+	TweenService:Create(ui.darkFill, TweenInfo.new(0.3), {
+		Size = UDim2.new(ratio, 0, 1, 0)
+	}):Play()
+
+	if inDark then
+		ui.darkFill.BackgroundColor3 = Color3.fromRGB(
+			math.floor(100 + (1 - ratio) * 155),
+			math.floor(60 * ratio),
+			math.floor(200 * ratio)
+		)
+		ui.darkText.Text = string.format("%.0fs", timer)
+	else
+		ui.darkFill.BackgroundColor3 = C.BAR_DARK
+		ui.darkText.Text = "aman"
+	end
+end
+
+local function showMessage(ui, text, color)
+	ui.msgOverlay.Visible = true
+	ui.msgLabel.Text       = text
+	ui.msgLabel.TextColor3 = color
+	TweenService:Create(ui.msgOverlay, TweenInfo.new(0.4), {
+		BackgroundTransparency = 0.35
+	}):Play()
+end
+
+-- ─────────────────────────────────────────────
+--  RULES PANEL TOGGLE
+-- ─────────────────────────────────────────────
+local function setupPanelToggle(ui)
+	local panelOpen = false
+
+	local function openPanel()
+		panelOpen = true
+		ui.rulesPanel.Visible = true
+		ui.rulesPanel.BackgroundTransparency = 1
+		TweenService:Create(ui.rulesPanel, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {
+			BackgroundTransparency = 0.08
+		}):Play()
+		ui.rulesBtn.Text       = "▲  RULES AKTIF"
+		ui.rulesBtn.TextColor3 = C.TEXT_WHITE
+	end
+
+	local function closePanel()
+		panelOpen = false
+		TweenService:Create(ui.rulesPanel, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+			BackgroundTransparency = 1
+		}):Play()
+		task.delay(0.2, function()
+			ui.rulesPanel.Visible = false
+		end)
+		ui.rulesBtn.Text       = "▼  RULES AKTIF"
+		ui.rulesBtn.TextColor3 = C.TEXT_DIM
+	end
+
+	ui.rulesBtn.MouseButton1Click:Connect(function()
+		if panelOpen then closePanel() else openPanel() end
+	end)
+
+	ui.panelClose.MouseButton1Click:Connect(function()
+		closePanel()
+	end)
+
+	-- Hover effect pada rulesBtn
+	ui.rulesBtn.MouseEnter:Connect(function()
+		if not panelOpen then
+			TweenService:Create(ui.rulesBtn, TweenInfo.new(0.12), {
+				BackgroundTransparency = 0.0,
+				TextColor3 = C.TEXT_WHITE,
+			}):Play()
+		end
+	end)
+	ui.rulesBtn.MouseLeave:Connect(function()
+		if not panelOpen then
+			TweenService:Create(ui.rulesBtn, TweenInfo.new(0.12), {
+				BackgroundTransparency = 0.2,
+				TextColor3 = C.TEXT_DIM,
+			}):Play()
+		end
+	end)
+end
+
+-- ─────────────────────────────────────────────
+--  FALLBACK: baca rules dari SessionInfo
+-- ─────────────────────────────────────────────
+local function readRulesFromSessionInfo()
+	local si = ReplicatedStorage:WaitForChild("SessionInfo", 10)
+	if not si then return nil end
+	local folder = si:WaitForChild("ActiveRules")
+	local ids = {}
+	for _, v in ipairs(folder:GetChildren()) do
+		table.insert(ids, v.Value)
+	end
+	return ids
+end
+
+-- ─────────────────────────────────────────────
+--  MAIN
 -- ─────────────────────────────────────────────
 local ui = buildGui()
+setupPanelToggle(ui)
 
-local function updateTaskLabel(data)
-    local coal    = string.format("🪨 Coal <b>%d/%d</b>", data.coal_done, data.coal_total)
-    local lever   = string.format("🔧 Lever <b>%d/%d</b>", data.lever_done, data.lever_total)
-    local battery = string.format("🔋 Battery <b>%d/%d</b>", data.battery_done, data.battery_total)
-    ui.taskLabel.Text = coal .. "   " .. lever .. "   " .. battery
+local rulesLoaded = false
+local function onRulesReceived(ruleIds)
+	if rulesLoaded then return end
+	rulesLoaded = true
+	populateRulesPanel(ui, ruleIds)
 end
 
-local function updateHunger(hunger: number)
-    ui.hungerContainer.Visible = true
-    local ratio = math.clamp(hunger / Constants.HUNGER_MAX, 0, 1)
+-- Jalur utama: RemoteEvent dari GameManager
+RE_RulesActivated.OnClientEvent:Connect(function(ruleIds)
+	onRulesReceived(ruleIds)
+end)
 
-    TweenService:Create(ui.hungerFill, TweenInfo.new(0.3), {
-        Size = UDim2.new(ratio, 0, 1, 0)
-    }):Play()
+-- Fallback: SessionInfo (kalau client telat load)
+task.spawn(function()
+	task.wait(1)
+	local ids = readRulesFromSessionInfo()
+	if ids then onRulesReceived(ids) end
+end)
 
-    -- Warna: hijau → kuning → merah
-    local r = math.clamp(2 * (1 - ratio), 0, 1)
-    local g = math.clamp(2 * ratio, 0, 1)
-    ui.hungerFill.BackgroundColor3 = Color3.new(r, g, 0)
-    ui.hungerText.Text = string.format("Hunger: %d%%", math.floor(hunger))
-end
-
-local function updateDark(timer: number, inDark: boolean)
-    ui.darkContainer.Visible = true
-    local ratio = math.clamp(timer / Constants.DARK_TIMER_MAX, 0, 1)
-
-    TweenService:Create(ui.darkFill, TweenInfo.new(0.3), {
-        Size = UDim2.new(ratio, 0, 1, 0)
-    }):Play()
-
-    -- Overlay gelap saat di dark zone, makin gelap saat timer habis
-    if inDark then
-        local overlayAlpha = 0.3 + (1 - ratio) * 0.5  -- 0.3 sampai 0.8
-        TweenService:Create(ui.darkOverlay, TweenInfo.new(0.5), {
-            BackgroundTransparency = 1 - overlayAlpha
-        }):Play()
-        ui.darkText.Text = string.format("Get to the light! %.0fs", timer)
-        ui.darkFill.BackgroundColor3 = Color3.fromRGB(
-            math.floor(100 + (1 - ratio) * 155),
-            math.floor(60 * ratio),
-            math.floor(200 * ratio)
-        )
-    else
-        TweenService:Create(ui.darkOverlay, TweenInfo.new(0.8), {
-            BackgroundTransparency = 1
-        }):Play()
-        ui.darkText.Text = "Dark timer (you're safe)"
-    end
-end
-
-local function showMessage(text: string, color: Color3)
-    ui.messageOverlay.Visible = true
-    ui.messageLabel.Text      = text
-    ui.messageLabel.TextColor3 = color
-
-    TweenService:Create(ui.messageOverlay, TweenInfo.new(0.4), {
-        BackgroundTransparency = 0.3
-    }):Play()
-end
-
--- ─────────────────────────────────────────────
---  Remote listeners
--- ─────────────────────────────────────────────
+-- Task progress
 RE_TaskProgress.OnClientEvent:Connect(function(data)
-    updateTaskLabel(data)
+	updateTaskLabel(ui, data)
 end)
 
 RE_SyncState.OnClientEvent:Connect(function(data)
-    updateTaskLabel(data)
+	updateTaskLabel(ui, data)
 end)
 
-RE_HungerUpdate.OnClientEvent:Connect(function(hunger: number)
-    updateHunger(hunger)
+-- Survival bars
+RE_HungerUpdate.OnClientEvent:Connect(function(hunger)
+	updateHunger(ui, hunger)
 end)
 
-RE_DarkUpdate.OnClientEvent:Connect(function(timer: number, inDark: boolean)
-    updateDark(timer, inDark)
+RE_DarkUpdate.OnClientEvent:Connect(function(timer, inDark)
+	updateDark(ui, timer, inDark)
 end)
 
+-- Win / death
 RE_GameWin.OnClientEvent:Connect(function()
-    showMessage("<b>🎉 ESCAPED!</b>\nReturning to lobby...", Color3.fromRGB(100, 255, 150))
+	showMessage(ui, "<b>🎉 KABUR!</b>\nKembali ke lobby...", C.WIN_GREEN)
 end)
 
-RE_PlayerDied.OnClientEvent:Connect(function(playerName: string, cause: string)
-    if playerName == LocalPlayer.Name then
-        local causeText = cause == "hunger" and "💀 You starved!" or "💀 Darkness consumed you!"
-        showMessage(causeText, Color3.fromRGB(255, 80, 80))
-    else
-        -- notif kecil kalau player lain mati
-        print(string.format("[SurvivalUI] %s mati — %s", playerName, cause))
-    end
+RE_PlayerDied.OnClientEvent:Connect(function(playerName, cause)
+	if playerName == LocalPlayer.Name then
+		local txt = cause == "hunger"
+			and "💀 Kamu kelaparan!"
+			or  "💀 Kegelapan menelanmu!"
+		showMessage(ui, txt, C.DEATH_RED)
+	end
 end)

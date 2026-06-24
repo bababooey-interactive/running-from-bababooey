@@ -103,7 +103,6 @@ export type TaskEntry = { done: number, total: number }
 export type TaskProgress = {
 	coal: TaskEntry,
 	lever: TaskEntry,
-	battery: TaskEntry,
 }
 
 -- ─────────────────────────────────────────────

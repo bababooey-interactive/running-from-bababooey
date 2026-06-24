@@ -79,7 +79,7 @@ Constants.NIGHTMARE_RULES = {
 --  MAP & GRID
 -- ─────────────────────────────────────────────
 
-Constants.TILE_SIZE = 8 -- lebar & kedalaman 1 tile (studs)
+Constants.TILE_SIZE = 16 -- lebar & kedalaman 1 tile (studs)
 Constants.WALL_HEIGHT = 24 -- tinggi wall (studs)
 
 -- Map scaling per level: cols/rows = BASE + (level - 1) * GROWTH, capped at MAX
@@ -141,7 +141,7 @@ Constants.MONSTER_REACH_BONUS = 10 -- studs TAMBAHAN dengan rule MONSTER_REACH
 
 Constants.TASK_COAL_COUNT = 3
 Constants.TASK_LEVER_COUNT = 2
-Constants.TASK_BATTERY_COUNT = 2
+--Constants.TASK_BATTERY_COUNT = 2
 Constants.TASK_ADD_PER_LEVEL = 2
 
 -- ─────────────────────────────────────────────

@@ -28,7 +28,7 @@ local taskState = {
     coal_total = 0,
     lever_done = 0,
     lever_total = 0,
-    battery_done  = 0,
+    --battery_done  = 0,
     battery_total = 0,
     won = false,
 }
@@ -43,10 +43,10 @@ local function initTaskCounts(level: number)
     local extra = math.max(0, level - 1) * Constants.TASK_ADD_PER_LEVEL
     taskState.coal_total    = Constants.TASK_COAL_COUNT    + extra
     taskState.lever_total   = Constants.TASK_LEVER_COUNT   + extra
-    taskState.battery_total = Constants.TASK_BATTERY_COUNT + extra
+    --taskState.battery_total = Constants.TASK_BATTERY_COUNT + extra
     taskState.coal_done     = 0
     taskState.lever_done    = 0
-    taskState.battery_done  = 0
+    --taskState.battery_done  = 0
     taskState.won           = false
     completedTasks          = {}
 end
@@ -60,8 +60,8 @@ local function broadcastProgress()
         coal_total    = taskState.coal_total,
         lever_done    = taskState.lever_done,
         lever_total   = taskState.lever_total,
-        battery_done  = taskState.battery_done,
-        battery_total = taskState.battery_total,
+        --battery_done  = taskState.battery_done,
+        --battery_total = taskState.battery_total,
     })
 end
 
@@ -73,8 +73,8 @@ local function checkWin()
 
     local allDone =
         taskState.coal_done    >= taskState.coal_total    and
-        taskState.lever_done   >= taskState.lever_total   and
-        taskState.battery_done >= taskState.battery_total
+        taskState.lever_done   >= taskState.lever_total
+        --taskState.battery_done >= taskState.battery_total
 
     if allDone then
         taskState.won = true
@@ -122,10 +122,10 @@ local function onTaskInteract(player: Player, payload: {taskType: string, taskId
         taskState.lever_done += 1
         print(string.format("[TaskSystem] Lever %d/%d — oleh %s", taskState.lever_done, taskState.lever_total, player.Name))
 
-    elseif taskType == "battery" and taskState.battery_done < taskState.battery_total then
-        completedTasks[taskId] = true
-        taskState.battery_done += 1
-        print(string.format("[TaskSystem] Battery %d/%d — oleh %s", taskState.battery_done, taskState.battery_total, player.Name))
+    --elseif taskType == "battery" and taskState.battery_done < taskState.battery_total then
+    --    completedTasks[taskId] = true
+    --    taskState.battery_done += 1
+    --    print(string.format("[TaskSystem] Battery %d/%d — oleh %s", taskState.battery_done, taskState.battery_total, player.Name))
 
     else
         return -- type tidak dikenal / sudah penuh
@@ -147,8 +147,8 @@ Players.PlayerAdded:Connect(function(player)
         coal_total    = taskState.coal_total,
         lever_done    = taskState.lever_done,
         lever_total   = taskState.lever_total,
-        battery_done  = taskState.battery_done,
-        battery_total = taskState.battery_total,
+        --battery_done  = taskState.battery_done,
+        --battery_total = taskState.battery_total,
         won           = taskState.won,
     })
 end)
