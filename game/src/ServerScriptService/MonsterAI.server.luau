@@ -339,7 +339,7 @@ local function beginStrike(player: Player)
 			return
 		end
 
-		-- ✨ THE FIX: A strict, tight impact hitbox.
+		-- A strict, tight impact hitbox.
 		-- It is just 2.5 studs wide. If you are not literally standing on the
 		-- exact spot the monster aimed at 0.5 seconds ago, the monster misses!
 		local IMPACT_HITBOX = 2.5
@@ -404,8 +404,6 @@ end
 -- ── MONSTER_REACH: Arm Extension ─────────────────────────────
 -- Welds a claw-extension part below each arm so they look longer.
 -- Only runs when MONSTER_REACH rule is active.
-
--- ── MONSTER_REACH: Arm Extension ─────────────────────────────
 local function applyReachVisual()
 	if not table.find(activeRules, Constants.Rules.MONSTER_REACH) then
 		return

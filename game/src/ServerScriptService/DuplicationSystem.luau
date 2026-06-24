@@ -6,6 +6,7 @@
 -- =============================================================
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService") -- ✨ ADDED TWEEN SERVICE
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
 local DuplicationSystem = {}
@@ -21,6 +22,78 @@ local RE_PlayerDied: RemoteEvent?
 
 function DuplicationSystem.init(playerDiedEvent: RemoteEvent)
 	RE_PlayerDied = playerDiedEvent
+end
+
+-- ── Tentacle Attack Visual (For Clones) ───────────────────────
+local function shootBlackTentacles(cloneModel: Model, rootPart: BasePart, targetPos: Vector3, extendTime: number)
+	local leftLimb = cloneModel:FindFirstChild("LeftHand", true)
+		or cloneModel:FindFirstChild("Left Arm", true)
+		or cloneModel:FindFirstChild("leftarm", true)
+		or rootPart
+
+	local rightLimb = cloneModel:FindFirstChild("RightHand", true)
+		or cloneModel:FindFirstChild("Right Arm", true)
+		or cloneModel:FindFirstChild("rightarm", true)
+		or rootPart
+
+	local limbs = { leftLimb, rightLimb }
+	local activeTentacles = {}
+
+	for _, limb in ipairs(limbs) do
+		if not limb then
+			continue
+		end
+
+		local att0 = Instance.new("Attachment")
+		att0.Parent = limb
+
+		local endPart = Instance.new("Part")
+		endPart.Size = Vector3.new(0.1, 0.1, 0.1)
+		endPart.Transparency = 1
+		endPart.Anchored = true
+		endPart.CanCollide = false
+		endPart.Position = limb.Position + (rootPart.CFrame.LookVector * 1)
+		endPart.Parent = workspace
+
+		local att1 = Instance.new("Attachment")
+		att1.Parent = endPart
+
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = att0
+		beam.Attachment1 = att1
+		beam.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0))
+		beam.Transparency = NumberSequence.new(0)
+		beam.Width0 = 3.5
+		beam.Width1 = 0.2
+		beam.FaceCamera = true
+		beam.CurveSize0 = math.random(-4, 4)
+		beam.CurveSize1 = math.random(-4, 4)
+		beam.Parent = endPart
+
+		table.insert(activeTentacles, { part = endPart, limb = limb })
+
+		TweenService:Create(
+			endPart,
+			TweenInfo.new(extendTime, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+			{ Position = targetPos }
+		):Play()
+	end
+
+	task.delay(extendTime + 0.8, function()
+		for _, t in ipairs(activeTentacles) do
+			if t.part and t.limb then
+				local retract = TweenService:Create(
+					t.part,
+					TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+					{ Position = t.limb.Position }
+				)
+				retract:Play()
+				retract.Completed:Once(function()
+					t.part:Destroy()
+				end)
+			end
+		end
+	end)
 end
 
 -- ── Simple clone AI (runs in task.spawn coroutine) ────────────
@@ -52,7 +125,6 @@ local function runCloneAI(clone: Model, rules: { string })
 		runTrack.Priority = Enum.AnimationPriority.Movement
 		runTrack.Looped = true
 
-		-- Load Action Animations
 		local spottedAnim = Instance.new("Animation")
 		spottedAnim.AnimationId = "rbxassetid://91571146490557"
 		spottedTrack = animator:LoadAnimation(spottedAnim)
@@ -66,7 +138,7 @@ local function runCloneAI(clone: Model, rules: { string })
 
 	local idleTimer = 0
 	local wanderTarget: Vector3? = nil
-	local lastTarget: Player? = nil -- ADD THIS to remember who we spotted
+	local lastTarget: Player? = nil
 
 	while clone.Parent ~= nil do
 		local dt = RunService.Heartbeat:Wait()
@@ -86,6 +158,7 @@ local function runCloneAI(clone: Model, rules: { string })
 			if not hrp then
 				continue
 			end
+
 			local d = (pos - hrp.Position).Magnitude
 			if d < targetDist then
 				targetDist = d
@@ -121,24 +194,78 @@ local function runCloneAI(clone: Model, rules: { string })
 				catchR += Constants.MONSTER_REACH_BONUS
 			end
 
+			-- ✨ THE NEW SKILL-BASED CLONE CATCH SEQUENCE ✨
 			if (pos - hrp.Position).Magnitude <= catchR then
-				-- Caught!
+				-- 1. Snapshot
+				local snapPos = hrp.Position
+				local monPos = root.Position
+				local flatDir = Vector3.new(snapPos.X - monPos.X, 0, snapPos.Z - monPos.Z)
+				local flatDist = flatDir.Magnitude
+
+				root.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
+				local STRIKE_TIME = 0.5
+
+				-- 2. Play Audio & Animations
 				if jumpscareTrack then
 					jumpscareTrack:Play()
 				end
-				local hum2 = char:FindFirstChildOfClass("Humanoid")
-				-- Health check
-				if hum2 and hum2.Health > 0 then
-					hum2.Health = 0
-					if RE_PlayerDied then
-						RE_PlayerDied:FireAllClients(target.Name)
+				local jumpSound = root:FindFirstChild("JumpscareSFX")
+				if jumpSound then
+					jumpSound:Play()
+				end
+
+				-- 3. Lunge Tween
+				if flatDist > 0.1 then
+					local lungePos = monPos + flatDir.Unit * math.max(0, flatDist - 1.5)
+					TweenService:Create(
+						root,
+						TweenInfo.new(STRIKE_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+						{ CFrame = CFrame.lookAt(lungePos, lungePos + flatDir.Unit) }
+					):Play()
+				end
+
+				-- 4. Shoot Tentacles
+				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
+
+				-- 5. Wait exactly the travel time (pauses this clone's AI)
+				task.wait(STRIKE_TIME)
+
+				-- 6. Check Dodge
+				local liveHRP = char:FindFirstChild("HumanoidRootPart")
+				if liveHRP then
+					local IMPACT_HITBOX = 2.5
+
+					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
+						-- ✅ CAUGHT!
+						local biteSound = root:FindFirstChild("BiteSFX")
+						local cutSound = root:FindFirstChild("HeadCutSFX")
+						if biteSound then
+							biteSound:Play()
+						end
+						task.delay(0.35, function()
+							if cutSound then
+								cutSound:Play()
+							end
+						end)
+
+						local hum2 = char:FindFirstChildOfClass("Humanoid")
+						if hum2 and hum2.Health > 0 then
+							hum2.Health = 0
+							if RE_PlayerDied then
+								RE_PlayerDied:FireAllClients(target.Name)
+							end
+						end
+						task.wait(2)
+					else
+						-- ❌ MISSED! Player dodged!
+						task.wait(1.2)
 					end
 				end
-				task.wait(2)
-				continue
+
+				continue -- Restart the loop to continue hunting
 			end
 
-			-- Move toward player (direct — no A* for clones)
+			-- Move toward player
 			local dir = hrp.Position - pos
 			local flatDir = Vector3.new(dir.X, 0, dir.Z)
 			local flatDist = flatDir.Magnitude
@@ -171,7 +298,7 @@ local function runCloneAI(clone: Model, rules: { string })
 			end
 			if wanderTarget then
 				local dir = wanderTarget - pos
-				local flatDir = Vector3.new(dir.X, 0, dir.Z) -- FIX: Flatten the direction!
+				local flatDir = Vector3.new(dir.X, 0, dir.Z)
 				local dist = flatDir.Magnitude
 
 				if dist > 1 then
@@ -194,7 +321,6 @@ end
 -- ── Public: activate duplication ─────────────────────────────
 
 function DuplicationSystem.processRules(original: Model, rules: { string })
-	-- Count MONSTER_DUPLICATE appearances (stacks)
 	local dupCount = 0
 	for _, r in ipairs(rules) do
 		if r == Constants.Rules.MONSTER_DUPLICATE then
@@ -205,15 +331,13 @@ function DuplicationSystem.processRules(original: Model, rules: { string })
 		return
 	end
 
-	-- 1 rule = 2 monsters, 2 rules = 4 monsters (2^N), capped at MAX_TOTAL
 	local totalMonsters = math.min(2 ^ dupCount, MAX_TOTAL)
-	local clonesNeeded = totalMonsters - 1 -- original = 1
+	local clonesNeeded = totalMonsters - 1
 
 	for i = 1, clonesNeeded do
 		local clone = original:Clone()
 		clone.Name = "SoulDragger_Clone_" .. i
 
-		-- Set noclip
 		for _, part in ipairs(clone:GetDescendants()) do
 			if part:IsA("BasePart") then
 				part.CanCollide = false
@@ -226,7 +350,6 @@ function DuplicationSystem.processRules(original: Model, rules: { string })
 			cloneRoot.Anchored = true
 		end
 
-		-- Spread clones evenly around original in a circle
 		local angle = (i / clonesNeeded) * math.pi * 2
 		local offset = Vector3.new(math.cos(angle) * 24, 0, math.sin(angle) * 24)
 		local spawnP = original:GetPivot().Position + offset
@@ -235,10 +358,9 @@ function DuplicationSystem.processRules(original: Model, rules: { string })
 
 		table.insert(activeClones, clone)
 
-		-- Run AI coroutine for this clone
 		local capturedRules = rules
 		task.spawn(function()
-			task.wait(0.3) -- let clone finish initializing
+			task.wait(0.3)
 			runCloneAI(clone, capturedRules)
 		end)
 	end
