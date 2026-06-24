@@ -20,10 +20,10 @@
 --  diketahui (lihat catatan di akhir file).
 -- =============================================================
 
-local Workspace          = game:GetService("Workspace")
-local ServerStorage       = game:GetService("ServerStorage")
-local Players             = game:GetService("Players")
-local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local ServerStorage = game:GetService("ServerStorage")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 
@@ -57,10 +57,10 @@ local TILE_SIZE = Constants.TILE_SIZE -- 8 (BUKAN 16 lagi)
 -- 8 studs), karena ScaleTo() itu uniform scale (X/Y/Z bareng). Ini
 -- prioritas yang disengaja -- wall TERLALU LEBAR jauh lebih berbahaya
 -- (blokir jalur) daripada wall sedikit lebih pendek dari ceiling.
-local WALL_SCALE     = TILE_SIZE / 4.034626007080078 -- ≈ 1.983
-local WALL_Y_OFFSET  = (2.969966411590576 * WALL_SCALE) / 2 -- setengah tinggi wall HASIL scale, bukan Constants.WALL_HEIGHT/2
+local WALL_SCALE = TILE_SIZE / 4.034626007080078 -- ≈ 1.983
+local WALL_Y_OFFSET = (2.969966411590576 * WALL_SCALE) / 2 -- setengah tinggi wall HASIL scale, bukan Constants.WALL_HEIGHT/2
 
-local CEILING_SCALE    = 4
+local CEILING_SCALE = 4
 local CEILING_Y_OFFSET = Constants.WALL_HEIGHT - 8
 
 -- FLOOR_SCALE dihitung dari ukuran asli floor_flat (4.03 x 0.43 x 4.01
@@ -69,22 +69,22 @@ local CEILING_Y_OFFSET = Constants.WALL_HEIGHT - 8
 local FLOOR_SCALE = TILE_SIZE / 4.025826454162598 -- ≈ 1.991
 local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ketebalan HASIL scale)
 
-local PROP_SCALE      = 3
+local PROP_SCALE = 3
 local FIREPLACE_SCALE = 4
-local CONVEYOR_SCALE  = 4
-local LANTERN_SCALE    = 2.5
-local DARKZONE_SCALE   = 1 -- dark zone model dipakai apa adanya, tanpa scale up
+local CONVEYOR_SCALE = 4
+local LANTERN_SCALE = 2
+local DARKZONE_SCALE = 1 -- dark zone model dipakai apa adanya, tanpa scale up
 
 local FLOOR_HEIGHT = 1
 
-local SIDE_BRANCH_CHANCE     = 0.85
+local SIDE_BRANCH_CHANCE = 0.85
 local SIDE_BRANCH_MIN_LENGTH = 3
 local SIDE_BRANCH_MAX_LENGTH = 5
 
-local PROP_CHANCE      = 0.18
-local RUBBLE_CHANCE    = 0.22
+local PROP_CHANCE = 0.18
+local RUBBLE_CHANCE = 0.22
 local SHORT_WALL_CHANCE = 0.12
-local FOOD_CHANCE       = 0.08 -- chance per tile floor biasa muncul food item
+local FOOD_CHANCE = 0.08 -- chance per tile floor biasa muncul food item
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
 
@@ -104,38 +104,30 @@ local LANTERN_LIGHT_RADIUS_TILES = 2.2 -- radius cover cahaya dalam satuan TILE 
 local function resolveLevelConfig(level: number)
 	level = math.max(1, level or 1)
 
-	local mapCols = math.min(
-		Constants.MAP_COLS_BASE + (level - 1) * Constants.MAP_GROWTH_PER_LEVEL,
-		Constants.MAP_MAX_COLS
-	)
-	local mapRows = math.min(
-		Constants.MAP_ROWS_BASE + (level - 1) * Constants.MAP_GROWTH_PER_LEVEL,
-		Constants.MAP_MAX_ROWS
-	)
+	local mapCols =
+		math.min(Constants.MAP_COLS_BASE + (level - 1) * Constants.MAP_GROWTH_PER_LEVEL, Constants.MAP_MAX_COLS)
+	local mapRows =
+		math.min(Constants.MAP_ROWS_BASE + (level - 1) * Constants.MAP_GROWTH_PER_LEVEL, Constants.MAP_MAX_ROWS)
 
-	local mainHallLength = Constants.MAIN_HALL_LENGTH_BASE
-		+ level * Constants.MAIN_HALL_LENGTH_PER_LEVEL
+	local mainHallLength = Constants.MAIN_HALL_LENGTH_BASE + level * Constants.MAIN_HALL_LENGTH_PER_LEVEL
 
 	-- Hall tidak boleh lebih panjang dari tinggi map (sisakan ruang
 	-- untuk dinding atas/bawah)
 	mainHallLength = math.min(mainHallLength, mapRows - 4)
 
-	local monsterSpeed = math.min(
-		Constants.MONSTER_SPEED_BASE + level * Constants.MONSTER_SPEED_PER_LEVEL,
-		Constants.MONSTER_SPEED_MAX
-	)
+	local monsterSpeed =
+		math.min(Constants.MONSTER_SPEED_BASE + level * Constants.MONSTER_SPEED_PER_LEVEL, Constants.MONSTER_SPEED_MAX)
 
-	local isNightmare = Constants.NIGHTMARE_EVERY_N_LEVELS > 0
-		and level % Constants.NIGHTMARE_EVERY_N_LEVELS == 0
+	local isNightmare = Constants.NIGHTMARE_EVERY_N_LEVELS > 0 and level % Constants.NIGHTMARE_EVERY_N_LEVELS == 0
 
 	return {
-		level        = level,
-		ruleCount    = math.min(level, #Constants.RULES_POOL),
-		mapCols      = mapCols,
-		mapRows      = mapRows,
-		mainHallLen  = mainHallLength,
+		level = level,
+		ruleCount = math.min(level, #Constants.RULES_POOL),
+		mapCols = mapCols,
+		mapRows = mapRows,
+		mainHallLen = mainHallLength,
 		monsterSpeed = monsterSpeed,
-		isNightmare  = isNightmare,
+		isNightmare = isNightmare,
 	}
 end
 
@@ -153,34 +145,34 @@ local MAIN_HALL_LENGTH = Constants.MAIN_HALL_LENGTH_BASE
 local Assets = ServerStorage:WaitForChild("Assets")
 local MapPieces = Assets:WaitForChild("MapPieces")
 
-local WallsFolder     = MapPieces:WaitForChild("Walls")
-local CeilingsFolder  = MapPieces:WaitForChild("Ceilings")
-local FloorsFolder    = MapPieces:WaitForChild("Floors")
-local PropsFolder      = MapPieces:WaitForChild("Props")
-local SpecialFolder    = MapPieces:FindFirstChild("Special")
+local WallsFolder = MapPieces:WaitForChild("Walls")
+local CeilingsFolder = MapPieces:WaitForChild("Ceilings")
+local FloorsFolder = MapPieces:WaitForChild("Floors")
+local PropsFolder = MapPieces:WaitForChild("Props")
+local SpecialFolder = MapPieces:FindFirstChild("Special")
 local TaskObjectsFolder = MapPieces:WaitForChild("TaskObjects")
-local LightingFolder    = MapPieces:WaitForChild("Lighting")
-local DarkZonesFolder   = MapPieces:WaitForChild("DarkZones")
-local FoodItemsFolder   = MapPieces:WaitForChild("FoodItems")
+local LightingFolder = MapPieces:WaitForChild("Lighting")
+local DarkZonesFolder = MapPieces:WaitForChild("DarkZones")
+local FoodItemsFolder = MapPieces:WaitForChild("FoodItems")
 
 local WallStraight = WallsFolder:WaitForChild("wall_straight")
-local WallCorner   = WallsFolder:FindFirstChild("wall_corner_90")
-local WallEndCap   = WallsFolder:FindFirstChild("wall_end_cap")
-local WallPillar    = WallsFolder:FindFirstChild("wall_pillar")
-local WallShort     = WallsFolder:FindFirstChild("wall_short")
+local WallCorner = WallsFolder:FindFirstChild("wall_corner_90")
+local WallEndCap = WallsFolder:FindFirstChild("wall_end_cap")
+local WallPillar = WallsFolder:FindFirstChild("wall_pillar")
+local WallShort = WallsFolder:FindFirstChild("wall_short")
 
-local CeilingFlat       = CeilingsFolder:WaitForChild("ceiling_flat")
-local CeilingArch       = CeilingsFolder:FindFirstChild("ceiling_arch")
-local CeilingCrack      = CeilingsFolder:FindFirstChild("ceiling_crack")
+local CeilingFlat = CeilingsFolder:WaitForChild("ceiling_flat")
+local CeilingArch = CeilingsFolder:FindFirstChild("ceiling_arch")
+local CeilingCrack = CeilingsFolder:FindFirstChild("ceiling_crack")
 local CeilingStalactite = CeilingsFolder:FindFirstChild("Ceiling_Stalactite_Group")
 
-local FloorFlat  = FloorsFolder:WaitForChild("floor_flat")
+local FloorFlat = FloorsFolder:WaitForChild("floor_flat")
 local FloorCrack = FloorsFolder:FindFirstChild("floor_crack")
 
-local BoulderLarge  = PropsFolder:FindFirstChild("boulder_large")
+local BoulderLarge = PropsFolder:FindFirstChild("boulder_large")
 local BoulderMedium = PropsFolder:FindFirstChild("boulder_medium")
-local BoulderSmall  = PropsFolder:FindFirstChild("boulder_small")
-local FloorRubble    = PropsFolder:FindFirstChild("Floor_Rubble_Group")
+local BoulderSmall = PropsFolder:FindFirstChild("boulder_small")
+local FloorRubble = PropsFolder:FindFirstChild("Floor_Rubble_Group")
 local FireplaceAsset = PropsFolder:FindFirstChild("old_fireplace_prop")
 
 local ConveyorAsset = nil
@@ -206,9 +198,9 @@ local LeverAsset = LeverFolder:FindFirstChild("lever_box")
 local LanternAsset = LightingFolder:WaitForChild("lantern")
 
 -- ── Dark Zones: 3 varian sesuai bentuk tile ──
-local DarkZoneAlley    = DarkZonesFolder:WaitForChild("DarkZone_Alley")    -- lorong sempit 1 tile
+local DarkZoneAlley = DarkZonesFolder:WaitForChild("DarkZone_Alley") -- lorong sempit 1 tile
 local DarkZoneCorridor = DarkZonesFolder:WaitForChild("DarkZone_Corridor") -- lorong biasa
-local DarkZoneRoom      = DarkZonesFolder:WaitForChild("DarkZone_Room")     -- ruangan/persimpangan lebar
+local DarkZoneRoom = DarkZonesFolder:WaitForChild("DarkZone_Room") -- ruangan/persimpangan lebar
 
 -- ── Food Items ──
 local FoodOptions = {}
@@ -217,14 +209,26 @@ for _, child in ipairs(FoodItemsFolder:GetChildren()) do
 end
 
 local BoulderOptions = {}
-if BoulderSmall then table.insert(BoulderOptions, BoulderSmall) end
-if BoulderMedium then table.insert(BoulderOptions, BoulderMedium) end
-if BoulderLarge then table.insert(BoulderOptions, BoulderLarge) end
+if BoulderSmall then
+	table.insert(BoulderOptions, BoulderSmall)
+end
+if BoulderMedium then
+	table.insert(BoulderOptions, BoulderMedium)
+end
+if BoulderLarge then
+	table.insert(BoulderOptions, BoulderLarge)
+end
 
 local CeilingOptions = { CeilingFlat }
-if CeilingArch then table.insert(CeilingOptions, CeilingArch) end
-if CeilingCrack then table.insert(CeilingOptions, CeilingCrack) end
-if CeilingStalactite then table.insert(CeilingOptions, CeilingStalactite) end
+if CeilingArch then
+	table.insert(CeilingOptions, CeilingArch)
+end
+if CeilingCrack then
+	table.insert(CeilingOptions, CeilingCrack)
+end
+if CeilingStalactite then
+	table.insert(CeilingOptions, CeilingStalactite)
+end
 
 -- ============================================================
 -- TILE TYPES (pakai Constants.Tile, BUKAN enum lokal lagi)
@@ -265,11 +269,7 @@ local function clearOldMap()
 end
 
 local function gridToWorld(col, row)
-	return Vector3.new(
-		(col - 1) * TILE_SIZE,
-		0,
-		(row - 1) * TILE_SIZE
-	)
+	return Vector3.new((col - 1) * TILE_SIZE, 0, (row - 1) * TILE_SIZE)
 end
 
 local function isInsideGrid(col, row)
@@ -301,9 +301,7 @@ local function getTile(grid, col, row)
 end
 
 local function isWalkable(tileType)
-	return tileType == Tile.FLOOR
-		or tileType == Tile.SPAWN
-		or tileType == Tile.CONVEYOR
+	return tileType == Tile.FLOOR or tileType == Tile.SPAWN or tileType == Tile.CONVEYOR
 end
 
 local function createPart(name, size, cframe, color, material)
@@ -322,6 +320,11 @@ end
 local function setPhysicsSafe(object, canCollide)
 	if canCollide == nil then
 		canCollide = true
+	end
+
+	-- If this is our lantern, do NOT anchor it! Let gravity work.
+	if object.Name == "lantern" or object.Name == "Lantern_Model" then
+		return
 	end
 
 	if object:IsA("BasePart") then
@@ -368,11 +371,11 @@ end
 
 local function carveMainHall(grid)
 	local centerCol = math.ceil(MAP_WIDTH / 2)
-	local hallLeft  = centerCol - math.floor(MAIN_HALL_WIDTH / 2)
+	local hallLeft = centerCol - math.floor(MAIN_HALL_WIDTH / 2)
 	local hallRight = hallLeft + MAIN_HALL_WIDTH - 1
 
 	local startRow = MAP_HEIGHT - 3
-	local endRow   = math.max(2, startRow - MAIN_HALL_LENGTH)
+	local endRow = math.max(2, startRow - MAIN_HALL_LENGTH)
 
 	for row = endRow + 1, startRow do
 		for col = hallLeft, hallRight do
@@ -390,12 +393,12 @@ local function carveMainHall(grid)
 
 	return {
 		centerCol = centerCol,
-		hallLeft  = hallLeft,
+		hallLeft = hallLeft,
 		hallRight = hallRight,
-		startRow  = startRow,
-		endRow    = endRow,
-		spawnCol  = centerCol,
-		spawnRow  = startRow,
+		startRow = startRow,
+		endRow = endRow,
+		spawnCol = centerCol,
+		spawnRow = startRow,
 		fireplaceCol = centerCol,
 		fireplaceRow = endRow, -- fireplace tetap di endRow, TANPA tile type khusus
 	}
@@ -518,7 +521,7 @@ local function placeWall(mapFolder, col, row, dirName)
 		scale,
 		true
 	)
-	
+
 	-- Koreksi tinggi: ScaleTo() di atas bikin tinggi cuma ~5.89 stud
 	-- (lebar sudah pas TILE_SIZE, tapi tinggi ikut keskalakan sama rata).
 	-- Stretch ULANG cuma sumbu Y biar nyampe Constants.WALL_HEIGHT,
@@ -527,19 +530,19 @@ local function placeWall(mapFolder, col, row, dirName)
 		local currentCFrame, currentSize = wallClone:GetBoundingBox()
 		local currentHeight = currentSize.Y
 		local heightScaleFactor = Constants.WALL_HEIGHT / currentHeight
-	
+
 		-- ScaleTo() lagi tapi cuma pakai faktor TINGGI -- ini akan
 		-- ikut membesarkan X/Z juga (ScaleTo selalu uniform), jadi
 		-- TIDAK dipakai di sini. Sebagai gantinya, pakai pendekatan
 		-- resize manual per-Part (lebih rumit tapi presisi):
-	
+
 		for _, part in ipairs(wallClone:GetDescendants()) do
 			if part:IsA("BasePart") then
 				local oldSize = part.Size
 				part.Size = Vector3.new(oldSize.X, oldSize.Y * heightScaleFactor, oldSize.Z)
 			end
 		end
-	
+
 		-- Setelah resize manual, posisi tiap part RELATIF terhadap pivot
 		-- model bisa sedikit bergeser (karena resize biasanya dari tengah
 		-- part itu sendiri, bukan dari pivot model). Re-pivot ke posisi
@@ -586,9 +589,7 @@ end
 local function placeFloor(mapFolder, col, row, tileType, hallInfo)
 	local pos = gridToWorld(col, row)
 
-	local isFireplaceTile = hallInfo
-		and col == hallInfo.fireplaceCol
-		and row == hallInfo.fireplaceRow
+	local isFireplaceTile = hallInfo and col == hallInfo.fireplaceCol and row == hallInfo.fireplaceRow
 
 	-- Pilih varian floor (sama logic seperti ceiling: kebanyakan flat,
 	-- sesekali crack untuk variasi visual)
@@ -667,9 +668,7 @@ local function createConveyorZone(mapFolder, col, row, hallInfo)
 			return
 		end
 
-		local isCoal = hit.Name == "coal"
-			or hit.Name == "Coal"
-			or hit.Name:lower():find("coal") ~= nil
+		local isCoal = hit.Name == "coal" or hit.Name == "Coal" or hit.Name:lower():find("coal") ~= nil
 
 		if not isCoal then
 			return
@@ -791,8 +790,7 @@ end
 local function placeFireplace(mapFolder, hallInfo)
 	local basePos = gridToWorld(hallInfo.fireplaceCol, hallInfo.fireplaceRow)
 
-	local fireplaceCFrame = CFrame.new(basePos + Vector3.new(0, 1, 0))
-		* CFrame.Angles(0, math.rad(180), 0)
+	local fireplaceCFrame = CFrame.new(basePos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(180), 0)
 
 	if FireplaceAsset then
 		cloneAsset(FireplaceAsset, mapFolder, fireplaceCFrame, FIREPLACE_SCALE, true)
@@ -1013,8 +1011,10 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 	for row = 1, MAP_HEIGHT, LANTERN_MAZE_SPACING do
 		for col = 1, MAP_WIDTH, LANTERN_MAZE_SPACING do
 			local tileType = getTile(grid, col, row)
-			local isInHall = col >= hallInfo.hallLeft and col <= hallInfo.hallRight
-				and row >= hallInfo.endRow and row <= hallInfo.startRow
+			local isInHall = col >= hallInfo.hallLeft
+				and col <= hallInfo.hallRight
+				and row >= hallInfo.endRow
+				and row <= hallInfo.startRow
 
 			if isWalkable(tileType) and not isInHall and not isOccupied(col, row) then
 				placeLantern(mapFolder, col, row)
@@ -1083,7 +1083,7 @@ local function placeDarkZones(grid, hallInfo)
 				if clone then
 					local darkZoneHeight = Constants.WALL_HEIGHT - 8 -- 10 stud
 					clone.Size = Vector3.new(TILE_SIZE, darkZoneHeight, TILE_SIZE)
-					clone.CFrame = CFrame.new(basePos + Vector3.new(0, darkZoneHeight/2 , 0))
+					clone.CFrame = CFrame.new(basePos + Vector3.new(0, darkZoneHeight / 2, 0))
 				end
 
 				clone:SetAttribute("IsDarkZone", true)
@@ -1181,7 +1181,8 @@ local function placeFoodItems(grid, hallInfo)
 			local tileType = getTile(grid, col, row)
 			local isFireplaceTile = col == hallInfo.fireplaceCol and row == hallInfo.fireplaceRow
 
-			if isWalkable(tileType)
+			if
+				isWalkable(tileType)
 				and tileType ~= Tile.SPAWN
 				and not isFireplaceTile
 				and not isOccupied(col, row)
@@ -1194,7 +1195,8 @@ local function placeFoodItems(grid, hallInfo)
 				local clone = cloneAsset(
 					selected,
 					foodFolder,
-					CFrame.new(basePos + offset + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+					CFrame.new(basePos + offset + Vector3.new(0, 1, 0))
+						* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 					1,
 					false
 				)
@@ -1328,10 +1330,16 @@ function MapGenerator.generateMap(level: number?)
 
 	movePlayersToSpawn(hallInfo)
 
-	print(string.format(
-		"[MapGenerator] Level %d generated. Map %dx%d, hall length %d, nightmare=%s",
-		level, MAP_WIDTH, MAP_HEIGHT, MAIN_HALL_LENGTH, tostring(levelConfig.isNightmare)
-	))
+	print(
+		string.format(
+			"[MapGenerator] Level %d generated. Map %dx%d, hall length %d, nightmare=%s",
+			level,
+			MAP_WIDTH,
+			MAP_HEIGHT,
+			MAIN_HALL_LENGTH,
+			tostring(levelConfig.isNightmare)
+		)
+	)
 
 	-- 1. RemoteEvent untuk Julian punya Minimap (Server -> Client)
 	MapGeneratedEvent:FireAllClients(grid, hallInfo)
