@@ -72,7 +72,7 @@ local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ket
 local PROP_SCALE = 1.5
 local COAL_SCALE = 2
 local LEVER_SCALE = 5
-local FIREPLACE_SCALE = 10
+local FIREPLACE_SCALE = 7
 local CONVEYOR_SCALE = 4
 local LANTERN_SCALE = 2
 local DARKZONE_SCALE = 1 -- dark zone model dipakai apa adanya, tanpa scale up
@@ -87,6 +87,7 @@ local PROP_CHANCE = 0.45
 local BOULDERLARGE_CHANCE = 0.50
 --local SHORT_WALL_CHANCE = 0.12
 local FOOD_CHANCE = 0.08 -- chance per tile floor biasa muncul food item
+local LANTERN_CHANCE = 0.4 -- chance per tile floor biasa muncul lantern (selain main hall)
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
 
@@ -95,9 +96,9 @@ local PROP_SAFE_MARGIN = 3 -- offset maksimum dari pusat tile (stud), TILE_SIZE 
 -- Lantern: ditempatkan di SEMUA tile main hall, dan tersebar di labirin
 -- sebelum dark zone dihitung. LANTERN_LIGHT_RADIUS dipakai untuk
 -- menentukan tile mana yang "tercover cahaya" saat menghitung dark zone.
-local LANTERN_MAZE_SPACING = 4 -- coba taruh lantern tiap N tile di labirin (jarak grid kasar)
-local LANTERN_HALL_SPACING = 2 -- jarak lantern di sisi kiri/kanan main hall (tiap N tile)
-local LANTERN_LIGHT_RADIUS_TILES = 2.2 -- radius cover cahaya dalam satuan TILE (bukan stud)
+-- local LANTERN_MAZE_SPACING = 4 -- coba taruh lantern tiap N tile di labirin (jarak grid kasar)
+local LANTERN_SPACING = 4 -- jarak lantern di map 
+local LANTERN_LIGHT_RADIUS_TILES = 2 -- radius cover cahaya dalam satuan TILE (bukan stud) awalnya 2.2
 
 -- ============================================================
 -- LEVEL CONFIG (scaling, sesuai Types.LevelConfig)
@@ -784,13 +785,13 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 
 	local basePos = gridToWorld(col, row)
 
-	if boulder_large and math.random() < BOULDERLARGE then
+	if BoulderOptions[BoulderLarge] and math.random() < BOULDERLARGE then
 		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
 		cloneAsset(
 			BoulderLarge,
 			mapFolder,
 			CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-			2,
+			PROP_SCALE,
 			true
 		)
 	end
@@ -980,7 +981,7 @@ end
 -- menentukan dark zone. [row][col] = true
 local litTiles = {}
 
-local function markLitAround(col, row, radiusTiles)
+function markLitAround(col, row, radiusTiles)
 	local r = math.ceil(radiusTiles)
 
 	for dRow = -r, r do
@@ -1000,14 +1001,14 @@ end
 local function placeLantern(mapFolder, col, row)
 	local basePos = gridToWorld(col, row)
 
-	-- Lantern ditempel di dinding terdekat kalau ada (lebih natural),
+	-- Lantern ditempel di atas lantai
 	-- fallback ke tengah tile kalau tidak ada referensi dinding.
 	-- Untuk simplicity & supaya konsisten, kita taruh di tengah tile
 	-- dengan offset Y mengikuti tinggi wall.
 	cloneAsset(
 		LanternAsset,
 		mapFolder,
-		CFrame.new(basePos + Vector3.new(0, Constants.WALL_HEIGHT - 22, 0)),
+		CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)),
 		LANTERN_SCALE,
 		false
 	)
@@ -1017,37 +1018,65 @@ local function placeLantern(mapFolder, col, row)
 end
 
 local function placeLanterns(mapFolder, grid, hallInfo)
-	-- 1. Main hall: lantern HANYA di sisi KIRI & KANAN (nempel dinding),
-	-- berselang tiap LANTERN_HALL_SPACING tile -- BUKAN memenuhi semua
-	-- kolom lebar hall (itu bikin berdempetan, lihat histori perbaikan).
-	for row = hallInfo.endRow, hallInfo.startRow, LANTERN_HALL_SPACING do
-		local isFireplaceTile = row == hallInfo.fireplaceRow
-
-		if isFireplaceTile then
-			-- Area fireplace tetap ditandai lit (fireplace = sumber
-			-- cahaya visualnya sendiri secara estetika), tanpa lantern
-			-- fisik tambahan di situ.
-			markLitAround(hallInfo.centerCol, row, LANTERN_LIGHT_RADIUS_TILES)
-		else
-			for _, col in ipairs({ hallInfo.hallLeft, hallInfo.hallRight }) do
-				local tileType = getTile(grid, col, row)
-
-				if isWalkable(tileType) and not isOccupied(col, row) then
-					placeLantern(mapFolder, col, row)
-				end
-			end
-		end
-	end
-
 	-- Pastikan baris terakhir hall (dekat spawn) & baris fireplace tetap
 	-- ke-cover cahaya walau tidak kena step LANTERN_HALL_SPACING persis
 	-- (mis. kalau hall length tidak habis dibagi spacing-nya).
 	markLitAround(hallInfo.centerCol, hallInfo.startRow, LANTERN_LIGHT_RADIUS_TILES)
 
+	local spawnCol = hallInfo.spawnCol
+	local spawnRow = hallInfo.spawnRow
+
+	-- Kita cek dulu apakah koordinatnya walkable
+	if isInsideGrid(spawnCol + 1, spawnRow) and isWalkable(getTile(grid, spawnCol + 1, spawnRow)) then
+		placeLantern(mapFolder, spawnCol + 1, spawnRow)
+		markLitAround(spawnCol + 1, spawnRow, LANTERN_LIGHT_RADIUS_TILES)
+	end
+
+	-- 3. Taruh lantern di sekitar FIREPLACE (misal: di baris sebelum fireplace, row + 1)
+	local fpCol = hallInfo.fireplaceCol
+	local fpRow = hallInfo.fireplaceRow
+	
+	-- Atau menaruh di tile sebelah kiri fireplace
+	if isInsideGrid(fpCol - 1, fpRow) and isWalkable(getTile(grid, fpCol - 1, fpRow)) then
+		placeLantern(mapFolder, fpCol - 1, fpRow)
+		markLitAround(fpCol - 1, fpRow, LANTERN_LIGHT_RADIUS_TILES)
+	end
+	
+	markLitAround(fpCol, fpRow, LANTERN_LIGHT_RADIUS_TILES)
+
+	-- 1. Main hall: lantern HANYA di sisi KIRI & KANAN,
+	-- berselang tiap LANTERN_HALL_SPACING tile -- BUKAN memenuhi semua
+	-- kolom lebar hall (itu bikin berdempetan, lihat histori perbaikan).
+	-- for row = hallInfo.endRow, hallInfo.startRow do
+	--	local isFireplaceTile = row == hallInfo.fireplaceRo
+	--	if isFireplaceTile then
+	--		-- Area fireplace tetap ditandai lit (fireplace = sumber
+	--		-- cahaya visualnya sendiri secara estetika), tanpa lantern
+	--		-- fisik tambahan di situ.
+	--		markLitAround(hallInfo.centerCol, row, LANTERN_LIGHT_RADIUS_TILES)
+	--	else
+	--		--for _, col in ipairs({ hallInfo.hallLeft, hallInfo.hallRight }) do
+	--			local tileType = getTile(grid, col, row)
+	--		--	if isWalkable(tileType) and not isOccupied(col, row) then
+	--		--		placeLantern(mapFolder, col, row)
+	--		--	end
+	--		--end
+	--		if isWalkable(tileType) and not isOccupied(col, row) then
+	--			-- deket spwan
+	--			local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow)
+	--			placeLantern(mapFolder, spawnPos + Vector3.new(4, FLOOR_THICKNESS, 0))
+--
+	--			-- deket fireplace
+	--			local firePos = gridToWorld(hallInfo.fireplaceCol, hallInfo.fireplaceRow)
+	--			placeLantern(mapFolder, firePos + Vector3.new(-4, FLOOR_THICKNESS, 0))
+	--		end
+	--	end
+	--end
+
 	-- 2. Labirin: tersebar tiap LANTERN_MAZE_SPACING tile (kasar),
 	-- hanya di tile yang valid & belum occupied.
-	for row = 1, MAP_HEIGHT, LANTERN_MAZE_SPACING do
-		for col = 1, MAP_WIDTH, LANTERN_MAZE_SPACING do
+	for row = 1, MAP_HEIGHT do
+		for col = 1, MAP_WIDTH, LANTERN_SPACING do
 			local tileType = getTile(grid, col, row)
 			local isInHall = col >= hallInfo.hallLeft
 				and col <= hallInfo.hallRight
@@ -1055,7 +1084,10 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 				and row <= hallInfo.startRow
 
 			if isWalkable(tileType) and not isInHall and not isOccupied(col, row) then
-				placeLantern(mapFolder, col, row)
+				if LanternAsset and math.random() < LANTERN_CHANCE then
+					placeLantern(mapFolder, col, row)
+					markLitAround(col, row, LANTERN_LIGHT_RADIUS_TILES)
+				end
 			end
 		end
 	end

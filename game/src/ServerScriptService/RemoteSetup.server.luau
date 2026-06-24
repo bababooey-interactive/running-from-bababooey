@@ -36,6 +36,7 @@ ensureRemote("HungerUpdate") -- server→client: hunger value
 ensureRemote("DarkUpdate") -- server→client: dark timer + inDark
 ensureRemote("PlayerDied") -- server→all: (name, cause)
 ensureRemote("EatFood") -- client→server: food pickup
+ensureRemote("ThrowBoulder")  -- client→server: lempar boulder yang dipegang
 
 -- Monster / Sensor system
 ensureRemote("MonsterPosition") -- server→all: monster pos + state

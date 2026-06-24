@@ -39,6 +39,7 @@ local RE_DepositCoal     = Remotes:WaitForChild("DepositCoal")
 local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 local RE_HungerChanged   = Remotes:WaitForChild("HungerChanged")   -- dari SurvivalSystem
 local RE_CoalDeposited   = Remotes:WaitForChild("CoalDeposited")   -- ke TaskSystem
+local RE_ThrowBoulder 	 = Remotes:WaitForChild("ThrowBoulder")
 
 -- ── Config ─────────────────────────────────────────────────────
 local HUNGER_RESTORE = {
@@ -51,6 +52,18 @@ local HUNGER_RESTORE_DEFAULT = 25
 -- Radius proximity agar prompt "Drop Coal" muncul saat dekat fireplace
 -- (dicek client-side lewat HeldItemChanged, server verify saat DepositCoal)
 local FIREPLACE_DEPOSIT_RADIUS = 12 -- studs
+
+-- Boulder throw config
+local THROW_FORCE     = 65    -- studs/s
+local THROW_ARC       = 15    -- derajat upward arc
+local LANDING_NOISE   = 0.85  -- noise level saat mendarat (0-1)
+local BOULDER_RESET_TIME = 8  -- detik sebelum boulder di-re-anchor
+
+-- Nama boulder yang bisa dilempar
+local THROWABLE_BOULDER_NAMES = {
+    boulder_small  = true,
+    boulder_medium = true,
+}
 
 -- Weld offset: item muncul di depan tangan kanan, sedikit terangkat
 local CARRY_WELD_OFFSET = CFrame.new(0, -0.15, -1.2)
@@ -241,8 +254,12 @@ local function pickupItem(player, itemModel)
 		end
 	end
 
+	-- Cek boulder
 	if not category then
-		return false, "unknown_item"
+		local name = itemModel.Name:lower()
+		if THROWABLE_BOULDER_NAMES[name] then
+			category = "boulder"
+		end
 	end
 
 	-- Disable semua ProximityPrompt di item (tidak perlu lagi saat sudah dipegang)
@@ -383,6 +400,81 @@ local function depositCoal(player)
 	print(string.format("[ItemPickup] %s deposit coal (TaskId=%s) ke fireplace", player.Name, tostring(coalTaskId)))
 end
 
+-- ── Core: Throw Boulder ─────────────────────────────────────────
+local function throwBoulder(player: Player)
+    local data = heldItems[player]
+    if not data or data.category ~= "boulder" then return end
+
+    local boulderModel = data.model
+    local boulderPart = getPrimaryOrFirstPart(boulderModel)
+    if not boulderPart then return end
+
+    -- Lepas weld
+    unweldItem(data)
+    heldItems[player] = nil
+    RE_HeldItemChanged:FireAllClients(player, nil, nil)
+
+    -- Pindah ke Workspace supaya physics bisa jalan
+    boulderModel.Parent = Workspace
+
+    -- Unanchor semua part
+    for _, desc in ipairs(boulderModel:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            desc.Anchored = false
+            desc.CanCollide = true
+        end
+    end
+    boulderPart.Anchored = false
+
+    -- Arah lempar dari karakter player
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local arcRad = math.rad(THROW_ARC)
+    local forward = root.CFrame.LookVector
+    local right = forward:Cross(Vector3.new(0,1,0)).Unit
+    local arcDir = (CFrame.fromAxisAngle(right, arcRad) * forward).Unit
+
+    boulderPart.AssemblyLinearVelocity = arcDir * THROW_FORCE
+
+    -- Landing detection
+    local touchConn
+    touchConn = boulderPart.Touched:Connect(function(hit)
+        if char and hit:IsDescendantOf(char) then return end
+        if boulderPart.AssemblyLinearVelocity.Magnitude > 5 then return end
+
+        touchConn:Disconnect()
+
+        -- Fire noise ke SensorSystem
+        local ok, SensorSystem = pcall(function()
+            return require(game:GetService("ServerScriptService"):FindFirstChild("SensorSystem"))
+        end)
+        if ok and SensorSystem then
+            SensorSystem.AddNoise(player, boulderPart.Position, LANDING_NOISE)
+            print(string.format("[ItemPickup] Boulder %s mendarat — noise fired", player.Name))
+        end
+
+        -- Re-anchor setelah delay
+        task.delay(BOULDER_RESET_TIME, function()
+            if boulderPart and boulderPart.Parent then
+                boulderPart.Anchored = true
+                boulderPart.AssemblyLinearVelocity = Vector3.zero
+                -- Kembalikan ke folder GeneratedMap
+                local mapFolder = Workspace:FindFirstChild("GeneratedMap")
+                if mapFolder then
+                    boulderModel.Parent = mapFolder
+                end
+            end
+        end)
+
+        -- Safety timeout
+        task.delay(BOULDER_RESET_TIME, function()
+            if touchConn then touchConn:Disconnect() end
+        end)
+    end)
+end
+
 -- ── Remote Connections ─────────────────────────────────────────
 
 RE_PickupItem.OnServerEvent:Connect(function(player, itemModel)
@@ -403,6 +495,10 @@ end)
 
 RE_DepositCoal.OnServerEvent:Connect(function(player)
 	depositCoal(player)
+end)
+
+RE_ThrowBoulder.OnServerEvent:Connect(function(player)
+    throwBoulder(player)
 end)
 
 -- ── Cleanup saat player leave ───────────────────────────────────
