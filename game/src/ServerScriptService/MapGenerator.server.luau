@@ -72,7 +72,7 @@ local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ket
 local PROP_SCALE = 1.5
 local COAL_SCALE = 2
 local LEVER_SCALE = 5
-local FIREPLACE_SCALE = 4
+local FIREPLACE_SCALE = 10
 local CONVEYOR_SCALE = 4
 local LANTERN_SCALE = 2
 local DARKZONE_SCALE = 1 -- dark zone model dipakai apa adanya, tanpa scale up
@@ -643,10 +643,12 @@ end
 local function placeCeiling(mapFolder, col, row, tileType)
 	local basePos = gridToWorld(col, row)
 	local selectedCeiling = CeilingFlat
+	local heightOffset = CEILING_Y_OFFSET
 
 	if tileType == Tile.CONVEYOR then
 		if CeilingArch then
 			selectedCeiling = CeilingArch
+			heightOffset = CEILING_Y_OFFSET + 2
 		end
 	elseif math.random() < 0.1 then
 		if CeilingCrack then
@@ -654,7 +656,7 @@ local function placeCeiling(mapFolder, col, row, tileType)
 		end
 	end
 
-	local ceilingPos = basePos + Vector3.new(0, CEILING_Y_OFFSET, 0)
+	local ceilingPos = basePos + Vector3.new(0, heightOffset, 0)
 
 	cloneAsset(selectedCeiling, mapFolder, CFrame.new(ceilingPos), CEILING_SCALE, true)
 end
@@ -834,7 +836,7 @@ local function placeFireplace(mapFolder, hallInfo)
 		local fireplaceMock = createPart(
 			"Mock_Fireplace",
 			Vector3.new(TILE_SIZE, 7, 3),
-			CFrame.new(basePos + Vector3.new(0, 3.5, 0)),
+			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)),
 			Color3.fromRGB(100, 50, 25),
 			Enum.Material.Brick
 		)
