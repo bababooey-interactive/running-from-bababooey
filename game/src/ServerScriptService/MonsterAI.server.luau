@@ -48,7 +48,8 @@ local sounds = SoundManager.new(monster)
 -- ── Constants ─────────────────────────────────────────────────
 -- TILE must equal MapGenerator's local TILE_SIZE (currently 16).
 -- If Gilang changes his TILE_SIZE value, update this to match.
-local TILE = 16
+
+local TILE = Constants.TILE_SIZE -- 8 (BUKAN 16 lagi)
 
 -- How high the monster's pivot sits above the tile floor (Y=0 center).
 -- Tile floor is 1 stud thick → top at Y=0.5.
@@ -598,7 +599,7 @@ if sessionInfo then
 end
 
 -- ── TEST rules (remove / comment out once Gilang's system is wired) ──
-activeRules = {
+-- activeRules = {
 	-- Constants.Rules.MONSTER_HEAR,
 	-- Constants.Rules.MONSTER_SMELL,
 	-- Constants.Rules.MONSTER_SEE,

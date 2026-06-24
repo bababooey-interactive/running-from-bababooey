@@ -7,6 +7,28 @@ local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
 local SensorSystem = {}
 
+-- ─── LIGHT CACHING SYSTEM ──────────────────────────────────────
+local activeLights = {}
+
+-- 1. Grab all existing lights right now
+for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
+	table.insert(activeLights, light)
+end
+
+-- 2. Listen for any new lights spawned by MapGenerator later
+CollectionService:GetInstanceAddedSignal("MapLights"):Connect(function(light)
+	table.insert(activeLights, light)
+end)
+
+-- 3. Remove lights from our list if they are destroyed (e.g., a breaker trips)
+CollectionService:GetInstanceRemovedSignal("MapLights"):Connect(function(light)
+	local index = table.find(activeLights, light)
+	if index then
+		table.remove(activeLights, index)
+	end
+end)
+-- ───────────────────────────────────────────────────────────────
+
 -- ─── Noise Store ──────────────────────────────────────────────
 
 type NoiseEvent = {
@@ -90,31 +112,25 @@ end
 -- Player dianggap "in light" kalau dekat PointLight yang cukup terang,
 -- OR kalau global ambient sangat terang (game terlalu terang).
 
-function SensorSystem.IsPlayerInLight(position: Vector3): boolean
-	-- Instantly grab ONLY the objects tagged as MapLights
-	for _, desc in ipairs(CollectionService:GetTagged("MapLights")) do
-		if not desc:IsA("Light") then
-			continue
-		end
-		local parent = desc.Parent
-		if not parent or not parent:IsA("BasePart") then
-			continue
-		end
-		if not desc.Enabled or desc.Brightness < 0.3 then
-			continue
-		end
+function SensorSystem.IsPlayerInLight(playerPos: Vector3): boolean
+	-- INSTEAD OF THIS: for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
+	-- WE USE OUR CACHE:
+	for _, light in ipairs(activeLights) do
+		-- Make sure the light actually exists and is turned on
+		if light:IsA("PointLight") and light.Enabled then
+			local lightPart = light.Parent
+			if lightPart then
+				local dist = (playerPos - lightPart.Position).Magnitude
 
-		-- Use the light's range to calculate distance
-		local dist = (position - parent.Position).Magnitude
-		if dist < desc.Range * 0.65 then
-			return true
+				-- If the player is inside the light's radius, they are visible!
+				if dist <= light.Range then
+					return true
+				end
+			end
 		end
 	end
 
-	-- Fallback: cek ambient global (gelap = tidak lit)
-	local amb = game.Lighting.Ambient
-	local avgBrightness = (amb.R + amb.G + amb.B) / 3
-	return avgBrightness > 0.45
+	return false
 end
 
 -- ─── Vision ─────────────────

@@ -1,20 +1,19 @@
 -- =============================================================
---  PlayerNoise.client.luau
+--  PlayerNoise.client.luau (Move to StarterCharacterScripts)
 -- =============================================================
 
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
+-- Because this is in StarterCharacterScripts, script.Parent IS the character!
+local character = script.Parent
 local hrp = character:WaitForChild("HumanoidRootPart")
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MakeNoise = Remotes:WaitForChild("PlayerMakeNoise")
 
-local WALK_SPEED = 1 -- Anything above 1 stud/s is considered moving
-local WALK_NOISE = 0.3 -- Noise level sent to monster
+local WALK_SPEED = 1
+local WALK_NOISE = 0.3
 local SEND_INTERVAL = 0.35
 local lastSent = 0
 
@@ -51,7 +50,7 @@ RunService.Heartbeat:Connect(function()
 	local vel = hrp.AssemblyLinearVelocity
 	local speed = Vector2.new(vel.X, vel.Z).Magnitude
 
-	-- 1. FOOTSTEPS: Only plays the walk sound when moving
+	-- 1. FOOTSTEPS
 	if sfx.walk then
 		if speed >= WALK_SPEED then
 			if not sfx.walk.IsPlaying then
@@ -64,7 +63,7 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- 2. BREATHING: Only kicks in when awareness is VERY high (Monster is actively hunting/chasing)
+	-- 2. BREATHING
 	if sfx.breath then
 		if currentAwareness >= 0.8 then
 			if not sfx.breath.IsPlaying then
@@ -78,14 +77,14 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- 3. HEARTBEAT: Slowly fades in as the monster gets near, beats faster the closer it gets
+	-- 3. HEARTBEAT (Added logic)
 	if sfx.heartbeat then
 		if currentAwareness >= 0.4 then
 			if not sfx.heartbeat.IsPlaying then
 				sfx.heartbeat:Play()
 			end
-			sfx.heartbeat.Volume = (currentAwareness - 0.4) / 0.6
-			sfx.heartbeat.PlaybackSpeed = 0.8 + currentAwareness * 0.6
+			sfx.heartbeat.Volume = currentAwareness
+			sfx.heartbeat.PlaybackSpeed = 1 + (currentAwareness * 0.5)
 		else
 			if sfx.heartbeat.IsPlaying then
 				sfx.heartbeat:Stop()
