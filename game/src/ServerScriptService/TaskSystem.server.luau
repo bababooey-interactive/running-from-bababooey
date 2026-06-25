@@ -215,9 +215,19 @@ local function hookTaskObject(obj: BasePart)
 			-- (Check both obj and obj.Parent just in case the prompt is on the base or the model)
 			local handle = obj:FindFirstChild("Lever_Handle") or obj.Parent:FindFirstChild("Lever_Handle")
 			if handle then
-				local targetCFrame = handle.CFrame * CFrame.Angles(math.rad(75), 0, 0)
-				local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-				TweenService:Create(handle, tweenInfo, { CFrame = targetCFrame }):Play()
+				-- Store the original CFrame once, then snap to pulled position
+				if not handle:GetAttribute("OriginalCFrame") then
+					-- Save original as CFrame components (Attributes don't support CFrame directly... use a flag instead)
+					handle:SetAttribute("IsPulled", false)
+				end
+
+				local isPulled = handle:GetAttribute("IsPulled")
+				if not isPulled then
+					local targetCFrame = handle.CFrame * CFrame.Angles(math.rad(90), 0, 0)
+					local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+					TweenService:Create(handle, tweenInfo, { CFrame = targetCFrame }):Play()
+					handle:SetAttribute("IsPulled", true)
+				end
 			end
 		elseif taskType == "battery" then
 			SoundManager.batteryInsert(obj.Position)

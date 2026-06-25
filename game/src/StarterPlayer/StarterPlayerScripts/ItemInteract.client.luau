@@ -4,46 +4,52 @@
 --  🔧 GANTI SELURUH ISI file lama
 -- =============================================================
 
-local Players           = game:GetService("Players")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace         = game:GetService("Workspace")
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
-local player    = Players.LocalPlayer
+local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-local Remotes   = ReplicatedStorage:WaitForChild("Remotes")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 -- ── Remote Events ──────────────────────────────────────────────
-local RE_PickupItem      = Remotes:WaitForChild("PickupItem")
-local RE_DropItem        = Remotes:WaitForChild("DropItem")
-local RE_EatFood         = Remotes:WaitForChild("EatFood")
-local RE_DepositCoal     = Remotes:WaitForChild("DepositCoal")
+local RE_PickupItem = Remotes:WaitForChild("PickupItem")
+local RE_DropItem = Remotes:WaitForChild("DropItem")
+local RE_EatFood = Remotes:WaitForChild("EatFood")
+local RE_DepositCoal = Remotes:WaitForChild("DepositCoal")
 local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 
 -- ── Config ─────────────────────────────────────────────────────
 local FIREPLACE_DEPOSIT_RADIUS = 12
-local PICKUP_RADIUS            = 5
+local PICKUP_RADIUS = 5
 local BOULDER_NAMES = {
-	boulder_small  = true,
+	boulder_small = true,
 	boulder_medium = true,
 }
 
 -- ── State ──────────────────────────────────────────────────────
-local heldItem     = nil
+local heldItem = nil
 local heldCategory = nil
-local eatGui       = nil
-local depositGui   = nil
-local promptSetup  = {}
+local eatGui = nil
+local depositGui = nil
+local promptSetup = {}
 local boulderHintGui = nil
 local isHoldingBoulder = false
 
 -- ── Helpers ────────────────────────────────────────────────────
 
 local function getPrimaryOrFirstPart(model)
-	if not model then return nil end
-	if model:IsA("BasePart") then return model end
-	if model.PrimaryPart then return model.PrimaryPart end
+	if not model then
+		return nil
+	end
+	if model:IsA("BasePart") then
+		return model
+	end
+	if model.PrimaryPart then
+		return model.PrimaryPart
+	end
 	return model:FindFirstChildWhichIsA("BasePart")
 end
 
@@ -53,40 +59,58 @@ local function findFireplacePosition()
 		for _, child in ipairs(genMap:GetDescendants()) do
 			if child:IsA("Model") and child.Name:lower():find("fireplace") then
 				local part = getPrimaryOrFirstPart(child)
-				if part then return part.Position end
+				if part then
+					return part.Position
+				end
 			end
 		end
 	end
 	local fp = Workspace:FindFirstChild("old_fireplace_prop")
 	if fp then
 		local part = getPrimaryOrFirstPart(fp)
-		if part then return part.Position end
+		if part then
+			return part.Position
+		end
 	end
 	return nil
 end
 
 local function isNearFireplace()
 	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root then return false end
+	if not root then
+		return false
+	end
 	local fpPos = findFireplacePosition()
-	if not fpPos then return false end
+	if not fpPos then
+		return false
+	end
 	return (root.Position - fpPos).Magnitude <= FIREPLACE_DEPOSIT_RADIUS
 end
 
 local function getItemCategory(model)
-	if not model or not model:IsA("Model") then return nil end
+	if not model or not model:IsA("Model") then
+		return nil
+	end
 
 	local taskType = model:GetAttribute("TaskType")
-	if taskType == "coal" then return "coal" end
+	if taskType == "coal" then
+		return "coal"
+	end
+	if taskType == "lever" then
+		return "lever"
+	end -- ADD THIS
 
-	-- Telusur parent chain cari folder FoodItems
 	local p = model.Parent
 	while p do
-		if p.Name == "FoodItems" then return "food" end
+		if p.Name == "FoodItems" then
+			return "food"
+		end
 		p = p.Parent
 	end
 
-	if model:GetAttribute("ItemCategory") == "food" then return "food" end
+	if model:GetAttribute("ItemCategory") == "food" then
+		return "food"
+	end
 
 	return nil
 end
@@ -94,184 +118,259 @@ end
 -- ── GUI ────────────────────────────────────────────────────────
 
 local function createEatGui(itemModel)
-	if eatGui then eatGui:Destroy() end
+	if eatGui then
+		eatGui:Destroy()
+	end
 	local part = getPrimaryOrFirstPart(itemModel)
-	if not part then return end
+	if not part then
+		return
+	end
 
 	local gui = Instance.new("BillboardGui")
-	gui.Name         = "EatPrompt"
-	gui.Adornee      = part
-	gui.Size         = UDim2.new(0, 200, 0, 44)
-	gui.StudsOffset  = Vector3.new(0, 3, 0)
-	gui.AlwaysOnTop  = true
+	gui.Name = "EatPrompt"
+	gui.Adornee = part
+	gui.Size = UDim2.new(0, 200, 0, 44)
+	gui.StudsOffset = Vector3.new(0, 3, 0)
+	gui.AlwaysOnTop = true
 	gui.ResetOnSpawn = false
 
 	local frame = Instance.new("Frame")
-	frame.Size                   = UDim2.new(1, 0, 1, 0)
-	frame.BackgroundColor3       = Color3.fromRGB(30, 20, 10)
+	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(30, 20, 10)
 	frame.BackgroundTransparency = 0.2
-	frame.BorderSizePixel        = 0
+	frame.BorderSizePixel = 0
 	frame.Parent = gui
 	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
 	local label = Instance.new("TextLabel")
-	label.Size                   = UDim2.new(1, 0, 1, 0)
+	label.Size = UDim2.new(1, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Text                   = "[E] Makan   [Q] Drop"
-	label.TextColor3             = Color3.fromRGB(255, 230, 160)
-	label.TextScaled             = true
-	label.Font                   = Enum.Font.GothamBold
-	label.Parent                 = frame
+	label.Text = "[E] Makan   [Q] Drop"
+	label.TextColor3 = Color3.fromRGB(255, 230, 160)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = frame
 
 	gui.Parent = player.PlayerGui
 	eatGui = gui
 end
 
 local function createDepositGui()
-	if depositGui then return end
+	if depositGui then
+		return
+	end
 
 	local sg = Instance.new("ScreenGui")
-	sg.Name         = "CoalDepositPrompt"
+	sg.Name = "CoalDepositPrompt"
 	sg.ResetOnSpawn = false
 
 	local frame = Instance.new("Frame")
-	frame.Size                   = UDim2.new(0, 240, 0, 54)
-	frame.Position               = UDim2.new(0.5, -120, 0.82, 0)
-	frame.BackgroundColor3       = Color3.fromRGB(40, 25, 10)
+	frame.Size = UDim2.new(0, 240, 0, 54)
+	frame.Position = UDim2.new(0.5, -120, 0.82, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(40, 25, 10)
 	frame.BackgroundTransparency = 0.15
-	frame.BorderSizePixel        = 0
+	frame.BorderSizePixel = 0
 	frame.Parent = sg
 	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color     = Color3.fromRGB(255, 140, 0)
+	stroke.Color = Color3.fromRGB(255, 140, 0)
 	stroke.Thickness = 2
-	stroke.Parent    = frame
+	stroke.Parent = frame
 
 	local label = Instance.new("TextLabel")
-	label.Size                   = UDim2.new(1, 0, 1, 0)
+	label.Size = UDim2.new(1, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Text                   = "🔥  [F] Lempar Coal ke Api"
-	label.TextColor3             = Color3.fromRGB(255, 200, 80)
-	label.TextScaled             = true
-	label.Font                   = Enum.Font.GothamBold
-	label.Parent                 = frame
+	label.Text = "🔥  [F] Lempar Coal ke Api"
+	label.TextColor3 = Color3.fromRGB(255, 200, 80)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = frame
 
 	sg.Parent = player.PlayerGui
 	depositGui = sg
 end
 
 local function createBoulderHintGui()
-    if boulderHintGui then return end
+	if boulderHintGui then
+		return
+	end
 
-    local sg = Instance.new("ScreenGui")
-    sg.Name         = "BoulderHintGui"
-    sg.ResetOnSpawn = false
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "BoulderHintGui"
+	sg.ResetOnSpawn = false
 
-    local frame = Instance.new("Frame")
-    frame.Size                   = UDim2.new(0, 280, 0, 54)
-    frame.Position               = UDim2.new(0.5, -140, 0.76, 0)
-    frame.BackgroundColor3       = Color3.fromRGB(30, 30, 35)
-    frame.BackgroundTransparency = 0.15
-    frame.BorderSizePixel        = 0
-    frame.Parent                 = sg
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 280, 0, 54)
+	frame.Position = UDim2.new(0.5, -140, 0.76, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+	frame.BackgroundTransparency = 0.15
+	frame.BorderSizePixel = 0
+	frame.Parent = sg
+	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
-    local stroke = Instance.new("UIStroke")
-    stroke.Color     = Color3.fromRGB(180, 140, 80)
-    stroke.Thickness = 2
-    stroke.Parent    = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(180, 140, 80)
+	stroke.Thickness = 2
+	stroke.Parent = frame
 
-    local label = Instance.new("TextLabel")
-    label.Size                   = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text                   = "🪨  [Klik Kiri Mouse] Lempar  |  [Q] Drop"
-    label.TextColor3             = Color3.fromRGB(230, 200, 140)
-    label.TextScaled             = true
-    label.Font                   = Enum.Font.GothamBold
-    label.Parent                 = frame
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = "🪨  [Klik Kiri Mouse] Lempar  |  [Q] Drop"
+	label.TextColor3 = Color3.fromRGB(230, 200, 140)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = frame
 
-    sg.Parent = player.PlayerGui
-    boulderHintGui = sg
+	sg.Parent = player.PlayerGui
+	boulderHintGui = sg
 end
 
 local function destroyBoulderHintGui()
-    if boulderHintGui then
-        boulderHintGui:Destroy()
-        boulderHintGui = nil
-    end
+	if boulderHintGui then
+		boulderHintGui:Destroy()
+		boulderHintGui = nil
+	end
 end
 
 local function destroyDepositGui()
-	if depositGui then depositGui:Destroy(); depositGui = nil end
+	if depositGui then
+		depositGui:Destroy()
+		depositGui = nil
+	end
 end
 
 local function destroyEatGui()
-	if eatGui then eatGui:Destroy(); eatGui = nil end
+	if eatGui then
+		eatGui:Destroy()
+		eatGui = nil
+	end
 end
-
 
 -- ── Setup ProximityPrompt per item ─────────────────────────────
 
 local function setupPrompt(model)
-	if promptSetup[model] then return end
+	if promptSetup[model] then
+		return
+	end
 	-- Cek apakah ini boulder (BasePart atau Model dengan nama boulder)
 	local modelName = model.Name:lower()
 	if BOULDER_NAMES[modelName] then
 		-- Boulder pakai ProximityPrompt sederhana (server yang handle pickup)
 		local targetPart = getPrimaryOrFirstPart(model)
-		if not targetPart then return end
+		if not targetPart then
+			return
+		end
 
-		for _, pp in ipairs(model:IsA("Model") and model:GetDescendants() or {model}) do
-			if pp:IsA("ProximityPrompt") then pp:Destroy() end
+		for _, pp in ipairs(model:IsA("Model") and model:GetDescendants() or { model }) do
+			if pp:IsA("ProximityPrompt") then
+				pp:Destroy()
+			end
 		end
 
 		local prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText            = "Pegang"
-		prompt.ObjectText            = "🪨 " .. model.Name
-		prompt.KeyboardKeyCode       = Enum.KeyCode.E
-		prompt.HoldDuration          = 0
+		prompt.ActionText = "Pegang"
+		prompt.ObjectText = "🪨 " .. model.Name
+		prompt.KeyboardKeyCode = Enum.KeyCode.E
+		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = PICKUP_RADIUS
-		prompt.RequiresLineOfSight   = false
-		prompt.Enabled				 = true
-		prompt.Style				 = Enum.ProximityPromptStyle.Default
-		prompt.Parent                = targetPart
+		prompt.RequiresLineOfSight = false
+		prompt.Enabled = true
+		prompt.Style = Enum.ProximityPromptStyle.Default
+		prompt.Parent = targetPart
 
 		prompt.Triggered:Connect(function()
-			if heldItem then return end
+			if heldItem then
+				return
+			end
 			RE_PickupItem:FireServer(model)
 		end)
 
 		promptSetup[model] = true
 		model.AncestryChanged:Connect(function()
-			if not model.Parent then promptSetup[model] = nil end
+			if not model.Parent then
+				promptSetup[model] = nil
+			end
 		end)
 		return -- stop di sini, boulder tidak perlu flow category di bawah
 	end
+
+	-- ADD: Lever branch
+	local taskType = model:GetAttribute("TaskType")
+	if taskType == "lever" then
+		local targetPart = getPrimaryOrFirstPart(model)
+		if not targetPart then
+			return
+		end
+
+		-- Remove any existing prompts first
+		for _, pp in ipairs(model:GetDescendants()) do
+			if pp:IsA("ProximityPrompt") then
+				pp:Destroy()
+			end
+		end
+
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ActionText = "Tarik"
+		prompt.ObjectText = "🔧 Lever"
+		prompt.KeyboardKeyCode = Enum.KeyCode.E
+		prompt.HoldDuration = 0.8 -- slight hold so it feels intentional
+		prompt.MaxActivationDistance = 5
+		prompt.RequiresLineOfSight = false
+		prompt.Parent = targetPart
+
+		prompt.Triggered:Connect(function()
+			-- Fire to server (TaskSystem handles the actual completion)
+			local RE_TaskInteract = Remotes:FindFirstChild("TaskInteract")
+			if RE_TaskInteract then
+				RE_TaskInteract:FireServer({
+					taskType = "lever",
+					taskId = model:GetAttribute("TaskId") or "",
+				})
+			end
+		end)
+
+		promptSetup[model] = true
+		model.AncestryChanged:Connect(function()
+			if not model.Parent then
+				promptSetup[model] = nil
+			end
+		end)
+		return
+	end
 	local category = getItemCategory(model)
-	if not category then return end
+	if not category then
+		return
+	end
 
 	local targetPart = getPrimaryOrFirstPart(model)
-	if not targetPart then return end
+	if not targetPart then
+		return
+	end
 
 	-- Hapus prompt lama (dari MapGenerator/hookFoodItem)
 	for _, pp in ipairs(model:GetDescendants()) do
-		if pp:IsA("ProximityPrompt") then pp:Destroy() end
+		if pp:IsA("ProximityPrompt") then
+			pp:Destroy()
+		end
 	end
 
 	local objectText = category == "coal" and "🪨 Coal" or "🍖 " .. model.Name
 
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText            = "Ambil"
-	prompt.ObjectText            = objectText
-	prompt.KeyboardKeyCode       = Enum.KeyCode.E
-	prompt.HoldDuration          = 0
+	prompt.ActionText = "Ambil"
+	prompt.ObjectText = objectText
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = PICKUP_RADIUS
-	prompt.RequiresLineOfSight   = false
-	prompt.Parent                = targetPart
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = targetPart
 
 	prompt.Triggered:Connect(function()
-		if heldItem then return end
+		if heldItem then
+			return
+		end
 		RE_PickupItem:FireServer(model)
 	end)
 
@@ -287,23 +386,33 @@ end
 -- ── Scan folder ────────────────────────────────────────────────
 
 local function scanFolder(folder)
-	if not folder then return end
+	if not folder then
+		return
+	end
 	for _, child in ipairs(folder:GetChildren()) do
-		if child:IsA("Model") then setupPrompt(child) end
+		if child:IsA("Model") then
+			setupPrompt(child)
+		end
 		-- juga scan 1 level dalam (untuk subfolder TaskObjects/Coal/...)
 		if child:IsA("Folder") then
 			for _, grandchild in ipairs(child:GetChildren()) do
-				if grandchild:IsA("Model") then setupPrompt(grandchild) end
+				if grandchild:IsA("Model") then
+					setupPrompt(grandchild)
+				end
 			end
 		end
 	end
 	folder.ChildAdded:Connect(function(child)
 		task.defer(function()
 			if child and child.Parent then
-				if child:IsA("Model") then setupPrompt(child) end
+				if child:IsA("Model") then
+					setupPrompt(child)
+				end
 				if child:IsA("Folder") then
 					for _, gc in ipairs(child:GetChildren()) do
-						if gc:IsA("Model") then setupPrompt(gc) end
+						if gc:IsA("Model") then
+							setupPrompt(gc)
+						end
 					end
 				end
 			end
@@ -326,7 +435,9 @@ local function doScan()
 		mapFolder.DescendantAdded:Connect(function(obj)
 			if obj:IsA("BasePart") and BOULDER_NAMES[obj.Name:lower()] then
 				task.defer(function()
-					if obj and obj.Parent then setupPrompt(obj) end
+					if obj and obj.Parent then
+						setupPrompt(obj)
+					end
 				end)
 			end
 		end)
@@ -346,8 +457,10 @@ doScan()
 -- ── HeldItemChanged ────────────────────────────────────────────
 
 RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category)
-	if whoPlayer ~= player then return end
-	heldItem     = itemModel
+	if whoPlayer ~= player then
+		return
+	end
+	heldItem = itemModel
 	heldCategory = category
 
 	if not itemModel then
@@ -361,13 +474,13 @@ RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category
 	if category == "food" then
 		createEatGui(itemModel)
 	elseif category == "boulder" then
-        isHoldingBoulder = true
-        createBoulderHintGui()
-        destroyEatGui()
+		isHoldingBoulder = true
+		createBoulderHintGui()
+		destroyEatGui()
 	else
 		destroyEatGui()
-        destroyBoulderHintGui()
-        isHoldingBoulder = false
+		destroyBoulderHintGui()
+		isHoldingBoulder = false
 	end
 end)
 
@@ -375,42 +488,51 @@ end)
 
 RunService.Heartbeat:Connect(function()
 	if heldCategory ~= "coal" then
-		if depositGui then destroyDepositGui() end
+		if depositGui then
+			destroyDepositGui()
+		end
 		return
 	end
-	if isNearFireplace() then createDepositGui()
-	else destroyDepositGui() end
+	if isNearFireplace() then
+		createDepositGui()
+	else
+		destroyDepositGui()
+	end
 end)
 
 -- ── Input ──────────────────────────────────────────────────────
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
+	if gameProcessed then
+		return
+	end
 	if input.KeyCode == Enum.KeyCode.T and heldCategory == "food" then
 		RE_EatFood:FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F and heldCategory == "coal" then
-		if isNearFireplace() then RE_DepositCoal:FireServer() end
+		if isNearFireplace() then
+			RE_DepositCoal:FireServer()
+		end
 	elseif input.KeyCode == Enum.KeyCode.Q and heldItem then
 		RE_DropItem:FireServer()
-        destroyBoulderHintGui()  -- tambahkan
-        isHoldingBoulder = false -- tambahkan
-    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if isHoldingBoulder then              -- tambahkan blok ini
-            local RE_ThrowBoulder = Remotes:FindFirstChild("ThrowBoulder")
-            if RE_ThrowBoulder then
-                RE_ThrowBoulder:FireServer()
-                destroyBoulderHintGui()
-                isHoldingBoulder = false
-            end
-        end
-    end
+		destroyBoulderHintGui() -- tambahkan
+		isHoldingBoulder = false -- tambahkan
+	elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if isHoldingBoulder then -- tambahkan blok ini
+			local RE_ThrowBoulder = Remotes:FindFirstChild("ThrowBoulder")
+			if RE_ThrowBoulder then
+				RE_ThrowBoulder:FireServer()
+				destroyBoulderHintGui()
+				isHoldingBoulder = false
+			end
+		end
+	end
 end)
 
 -- ── Character refresh ──────────────────────────────────────────
 
 player.CharacterAdded:Connect(function(newChar)
-	character    = newChar
-	heldItem     = nil
+	character = newChar
+	heldItem = nil
 	heldCategory = nil
 	isHoldingBoulder = false
 	destroyEatGui()
