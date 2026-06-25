@@ -8,7 +8,7 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService") -- ✨ ADDED TWEEN SERVICE
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
-
+local SoundManager = require(script.Parent.SoundManager)
 local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
@@ -105,6 +105,9 @@ local function runCloneAI(clone: Model, rules: { string })
 	end
 
 	clone.PrimaryPart = root
+	local cloneSounds = SoundManager.new(clone)
+	local currentState = "IDLE"
+	cloneSounds:onStateChange("IDLE", false)
 
 	-- Load walk and run animations
 	local hum = clone:FindFirstChildOfClass("Humanoid")
@@ -140,11 +143,6 @@ local function runCloneAI(clone: Model, rules: { string })
 	local wanderTarget: Vector3? = nil
 	local lastTarget: Player? = nil
 
-	-- ✨ 1. ADD THESE SOUND VARIABLES HERE ✨
-	local walkSFX = root:FindFirstChild("FootstepSFX")
-	local roarSFX = root:FindFirstChild("RoarSFX")
-	local roarCD = 0
-
 	while clone.Parent ~= nil do
 		local dt = RunService.Heartbeat:Wait()
 
@@ -172,6 +170,10 @@ local function runCloneAI(clone: Model, rules: { string })
 		end
 
 		if target then
+			if currentState ~= "CHASE" then
+				currentState = "CHASE"
+				cloneSounds:onStateChange("CHASE", true)
+			end
 			if target ~= lastTarget then
 				lastTarget = target
 				if spottedTrack then
@@ -184,17 +186,7 @@ local function runCloneAI(clone: Model, rules: { string })
 			if runTrack and not runTrack.IsPlaying then
 				runTrack:Play(0.2)
 			end
-			if walkSFX then
-				walkSFX.PlaybackSpeed = 1.55
-				walkSFX.Volume = 1.0
-				if not walkSFX.IsPlaying then
-					walkSFX:Play()
-				end
-			end
-			if os.clock() > roarCD and roarSFX then
-				roarCD = os.clock() + 12
-				roarSFX:Play()
-			end
+
 			local char = target.Character
 			if not char then
 				continue
@@ -237,14 +229,11 @@ local function runCloneAI(clone: Model, rules: { string })
 					):Play()
 				end
 
+				currentState = "CATCH"
+				cloneSounds:onStateChange("CATCH", false)
 				if jumpscareTrack then
 					jumpscareTrack:Play()
 				end
-				local jSFX = root:FindFirstChild("JumpscareSFX")
-				if jSFX then
-					jSFX:Play()
-				end
-
 				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
 				task.wait(STRIKE_TIME)
 
@@ -252,16 +241,7 @@ local function runCloneAI(clone: Model, rules: { string })
 				if liveHRP then
 					local IMPACT_HITBOX = 2.5
 					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
-						local biteSound = root:FindFirstChild("BiteSFX")
-						local cutSound = root:FindFirstChild("HeadCutSFX")
-						if biteSound then
-							biteSound:Play()
-						end
-						task.delay(0.35, function()
-							if cutSound then
-								cutSound:Play()
-							end
-						end)
+						cloneSounds:playHitSounds()
 						local hum2 = char:FindFirstChildOfClass("Humanoid")
 						if hum2 and hum2.Health > 0 then
 							hum2.Health = 0
@@ -274,7 +254,7 @@ local function runCloneAI(clone: Model, rules: { string })
 						task.wait(1.2)
 					end
 				end
-
+				currentState = "IDLE"
 				continue
 			end
 
@@ -294,6 +274,10 @@ local function runCloneAI(clone: Model, rules: { string })
 				end
 			end
 		else
+			if currentState ~= "IDLE" then
+				currentState = "IDLE"
+				cloneSounds:onStateChange("IDLE", false)
+			end
 			lastTarget = nil
 			if runTrack and runTrack.IsPlaying then
 				runTrack:Stop(0.2)
@@ -301,13 +285,7 @@ local function runCloneAI(clone: Model, rules: { string })
 			if walkTrack and not walkTrack.IsPlaying then
 				walkTrack:Play(0.2)
 			end
-			if walkSFX then
-				walkSFX.PlaybackSpeed = 0.75
-				walkSFX.Volume = 0.5
-				if not walkSFX.IsPlaying then
-					walkSFX:Play()
-				end
-			end
+
 			-- Idle wander
 			idleTimer += 0.05
 			if idleTimer >= 3 or not wanderTarget then

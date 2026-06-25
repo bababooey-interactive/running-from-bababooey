@@ -1,5 +1,5 @@
 local SoundService = game:GetService("SoundService")
-local ambientMusic = SoundService:WaitForChild("AmbientHorrorLoop")
+local ambientMusic = SoundService:WaitForChild("AmbientLoop")
 
 -- How many seconds of silence you want between loops
 local PAUSE_TIME = 1

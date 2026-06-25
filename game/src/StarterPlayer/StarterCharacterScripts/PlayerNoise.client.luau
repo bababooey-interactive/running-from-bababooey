@@ -1,14 +1,27 @@
 -- =============================================================
---  PlayerNoise.client.luau (Move to StarterCharacterScripts)
+--  PlayerNoise.client.luau (in StarterCharacterScripts)
 -- =============================================================
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Because this is in StarterCharacterScripts, script.Parent IS the character!
 local character = script.Parent
 local hrp = character:WaitForChild("HumanoidRootPart")
 
+-- ── SETUP AUDIO ──
+local function addSound(name, id, isLooped)
+	local s = Instance.new("Sound")
+	s.Name = name
+	s.SoundId = id
+	s.Looped = isLooped
+	s.Parent = hrp
+end
+
+addSound("FootstepWalk", "rbxassetid://5446226292", true)
+addSound("BreathingFast", "rbxassetid://94952921557556", true)
+addSound("Heartbeat", "rbxassetid://139481207162657", true)
+
+-- ── NOISE SENDER ──
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MakeNoise = Remotes:WaitForChild("PlayerMakeNoise")
 
@@ -17,7 +30,6 @@ local WALK_NOISE = 0.3
 local SEND_INTERVAL = 0.35
 local lastSent = 0
 
--- ── NOISE SENDER ─────────────────────────────────────────────
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
 	if now - lastSent < SEND_INTERVAL then
@@ -33,7 +45,7 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
--- ── LOCAL PLAYER SFX ─────────────────────────────────────────
+-- ── LOCAL PLAYER SFX ──
 local sfx = {
 	walk = hrp:FindFirstChild("FootstepWalk"),
 	breath = hrp:FindFirstChild("BreathingFast"),
@@ -77,7 +89,7 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- 3. HEARTBEAT (Added logic)
+	-- 3. HEARTBEAT
 	if sfx.heartbeat then
 		if currentAwareness >= 0.4 then
 			if not sfx.heartbeat.IsPlaying then
