@@ -377,34 +377,28 @@ def build_scene():
     # Origin at (0, 0, 0): the absolute bottom-centre of the base plate.
     set_origin_to_world(lever_base, 0.0, 0.0, 0.0)
 
-    # ── Construct Lever_Handle ────────────────────────────────────────────────
-    shaft = build_shaft()
-    knob = build_knob()
+    # ── Construct Lever_Handle & Lever_Knob ───────────────────────────────────
+    lever_handle = build_shaft()
+    lever_handle.name = "Lever_Handle"  # Rename shaft so Gilang's script still finds it
+    lever_knob = build_knob()
+    lever_knob.name = "Lever_Knob"
 
-    # Join shaft + knob into a single Lever_Handle mesh.
-    lever_handle = join_into(
-        components=[shaft, knob],
-        active_component=shaft,
-        final_name="Lever_Handle",
-    )
-
-    # CRITICAL: Place the origin at the rotation axis centre.
-    # (0, 0, PIVOT_Z) is the centre of the housing arc and the physical
-    # hinge point.  This single call is what makes the Roblox animation work.
+    # CRITICAL: Place the origin at the rotation axis centre for BOTH parts.
+    # This ensures both pieces hinge from the exact same pivot point.
     set_origin_to_world(lever_handle, 0.0, 0.0, PIVOT_Z)
+    set_origin_to_world(lever_knob, 0.0, 0.0, PIVOT_Z)
 
-    # ── Parent handle to base ─────────────────────────────────────────────────
-    # The handle inherits the base's world transform (moves when the base
-    # moves) while remaining independently rotatable for animation.
+    # ── Parent both to base ─────────────────────────────────────────────────
     lever_handle.parent = lever_base
+    lever_knob.parent = lever_base
 
-    return lever_base, lever_handle
+    return lever_base, lever_handle, lever_knob
 
 
 # ─── EXPORT ──────────────────────────────────────────────────────────────────
 
 
-def export(lever_base, lever_handle):
+def export(lever_base, lever_handle, lever_knob):
     """
     Write lever_box.fbx and lever_box.blend to EXPORT_DIR.
 
@@ -423,6 +417,7 @@ def export(lever_base, lever_handle):
     bpy.ops.object.select_all(action="DESELECT")
     lever_base.select_set(True)
     lever_handle.select_set(True)
+    lever_knob.select_set(True)
     make_active(lever_base)
 
     bpy.ops.export_scene.fbx(
@@ -468,5 +463,7 @@ def export(lever_base, lever_handle):
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
-lever_base, lever_handle = build_scene()
-export(lever_base, lever_handle)
+# ─── ENTRY POINT ─────────────────────────────────────────────────────────────
+
+lever_base, lever_handle, lever_knob = build_scene()
+export(lever_base, lever_handle, lever_knob)
