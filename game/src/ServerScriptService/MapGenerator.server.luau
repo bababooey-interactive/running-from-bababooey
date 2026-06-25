@@ -89,7 +89,7 @@ local PROP_CHANCE = 0.45
 local BOULDERLARGE_CHANCE = 0.15
 --local SHORT_WALL_CHANCE = 0.12
 local FOOD_CHANCE = 0.3 -- chance per tile floor biasa muncul food item
-local LANTERN_CHANCE = 0.45 -- chance per tile floor biasa muncul lantern (selain main hall)
+local LANTERN_CHANCE = 1 -- chance per tile floor biasa muncul lantern (selain main hall)
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
 
@@ -1032,7 +1032,7 @@ local function placeLantern(mapFolder, col, row, offsetX, offsetZ)
 		end
 	end
 	markLitAround(col, row, LANTERN_LIGHT_RADIUS_TILES)
-	--markOccupied(col, row)
+	markOccupied(col, row)
 end
 
 local function placeLanterns(mapFolder, grid, hallInfo)
@@ -1101,6 +1101,7 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 				and col <= hallInfo.hallRight
 				and row >= hallInfo.endRow
 				and row <= hallInfo.startRow
+<<<<<<< HEAD
 			if not isWalkable(tileType) or isInHall then 
 				continue
 			end
@@ -1123,6 +1124,21 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 					local offsetX = math.random(-2, 2)
 					local offsetZ = math.random(-2, 2)
 					placeLantern(mapFolder, col, row, offsetX, offsetZ)
+=======
+			if not isWalkable(offsetTileType) or isInHall then 
+				continue
+			end
+			local lanternCount = math.random(1, 3) -- jumlah lantern per tile, acak 1-3
+			for _ = 1, lanternCount do
+				local offsetCol = col + math.random(-2, 2)
+				local offsetRow = row + math.random(-2, 2)
+				if isInsideGrid(offsetCol, offsetRow) then
+					local offsetTileType = getTile(grid, offsetCol, offsetRow)
+					if LanternAsset and math.random() < LANTERN_CHANCE then
+						placeLantern(mapFolder, offsetCol, offsetRow)
+						markLitAround(offsetCol, offsetRow, LANTERN_LIGHT_RADIUS_TILES)
+					end
+>>>>>>> 9d46a47fc3c532be1dd7028c52dad9339eff42e2
 				end
 			end
 		end
@@ -1290,9 +1306,17 @@ local function placeFoodItems(grid, hallInfo)
 			if not isWalkable(tileType) or tileType == Tile.SPAWN or isFireplaceTile then
 				continue
 			end
+<<<<<<< HEAD
 			if math.random() < FOOD_CHANCE then
 				local foodCount = math.random(1, 3) -- Jumlah food per tile (acak 1-3)
 				for _ = 1, foodCount do
+=======
+			local foodCount = math.random(1, 3) -- Jumlah food per tile (acak 1-3)
+			for _ = 1, foodCount do
+				local offsetCol = col + math.random(-2, 2)
+				local offsetRow = row + math.random(-2, 2)
+				if math.random() < FOOD_CHANCE then
+>>>>>>> 9d46a47fc3c532be1dd7028c52dad9339eff42e2
 					local selected = FoodOptions[math.random(1, #FoodOptions)]
 					local basePos = gridToWorld(col, row)
 					local offsetX = math.random(-2, 2)
@@ -1314,6 +1338,10 @@ local function placeFoodItems(grid, hallInfo)
 					)
 					--hookFoodItem(clone)
 					clone:SetAttribute("ItemCategory", "food")
+<<<<<<< HEAD
+=======
+					markOccupied(col, row)
+>>>>>>> 9d46a47fc3c532be1dd7028c52dad9339eff42e2
 				end
 				markOccupied(col, row)
 			end	
