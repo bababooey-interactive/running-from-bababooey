@@ -329,6 +329,8 @@ local function setupPrompt(model)
 					taskId = model:GetAttribute("TaskId") or "",
 				})
 			end
+			-- Disable prompt immediately so player can't pull again
+			prompt.Enabled = false
 		end)
 
 		promptSetup[model] = true
