@@ -237,7 +237,11 @@ local function runCloneAI(clone: Model, rules: { string })
 				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
 				task.wait(STRIKE_TIME)
 
-				local liveHRP = char:FindFirstChild("HumanoidRootPart")
+				if not target or not target.Character then
+					currentState = "IDLE"
+					continue
+				end
+				local liveHRP = target.Character:FindFirstChild("HumanoidRootPart")
 				if liveHRP then
 					local IMPACT_HITBOX = 4
 					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
