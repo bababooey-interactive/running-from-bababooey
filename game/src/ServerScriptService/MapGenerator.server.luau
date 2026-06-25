@@ -206,10 +206,19 @@ local DarkZoneAlley = DarkZonesFolder:WaitForChild("DarkZone_Alley") -- lorong s
 local DarkZoneCorridor = DarkZonesFolder:WaitForChild("DarkZone_Corridor") -- lorong biasa
 local DarkZoneRoom = DarkZonesFolder:WaitForChild("DarkZone_Room") -- ruangan/persimpangan lebar
 
--- ── Food Items ──
+-- ── Food Items ── 
+-- — simpan scale asli tiap item supaya ScaleTo tidak
+-- override scale manual yang sudah diset di Studio (mis. waterbottle = 0.01)
 local FoodOptions = {}
 for _, child in ipairs(FoodItemsFolder:GetChildren()) do
-	table.insert(FoodOptions, child)
+    -- Simpan scale asli sebagai Attribute supaya bisa dibaca saat spawn
+    local currentScale = 1
+    if child:IsA("Model") then
+        -- Model punya Scale di bawah Pivot
+        currentScale = child:GetScale()
+    end
+    child:SetAttribute("OriginalScale", currentScale)
+    table.insert(FoodOptions, child)
 end
 
 local BoulderOptions = {}
@@ -1263,12 +1272,18 @@ local function placeFoodItems(grid, hallInfo)
 				local basePos = gridToWorld(col, row)
 				local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
 
+				-- Hitung scale final = scale asli asset × FOOD_SCALE
+				-- Ini mempertahankan scale manual yang sudah diset di Studio
+				-- (mis. waterbottle 0.01) dan hanya mengalikannya, bukan override.
+				local originalScale = selected:GetAttribute("OriginalScale") or 1
+				local finalscale = originalScale * FOOD_SCALE
+
 				local clone = cloneAsset(
 					selected,
 					foodFolder,
 					CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
 						* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-					FOOD_SCALE,
+					finalscale,
 					false
 				)
 
