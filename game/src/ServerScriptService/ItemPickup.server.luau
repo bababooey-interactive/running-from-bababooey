@@ -464,7 +464,6 @@ local function throwBoulder(player: Player)
 
 		touchConn:Disconnect()
 
-		-- Fire noise ke SensorSystem
 		local ok, SensorSystem = pcall(function()
 			return require(game:GetService("ServerScriptService"):FindFirstChild("SensorSystem"))
 		end)
@@ -473,12 +472,10 @@ local function throwBoulder(player: Player)
 			print(string.format("[ItemPickup] Boulder %s mendarat — noise fired", player.Name))
 		end
 
-		-- Re-anchor setelah delay
 		task.delay(BOULDER_RESET_TIME, function()
 			if boulderPart and boulderPart.Parent then
 				boulderPart.Anchored = true
 				boulderPart.AssemblyLinearVelocity = Vector3.zero
-				-- Kembalikan ke folder GeneratedMap
 				local mapFolder = Workspace:FindFirstChild("GeneratedMap")
 				if mapFolder then
 					boulderModel.Parent = mapFolder
@@ -486,18 +483,7 @@ local function throwBoulder(player: Player)
 			end
 		end)
 
-		touchConn:Disconnect()
-
-		-- Fire noise ke SensorSystem
-		local ok, SensorSystem = pcall(function()
-			return require(game:GetService("ServerScriptService"):FindFirstChild("SensorSystem"))
-		end)
-		if ok and SensorSystem then
-			SensorSystem.AddNoise(player, boulderPart.Position, LANDING_NOISE)
-		end
-
-		-- Boulder langsung dihilangkan setelah mendarat (sesuai permintaan)
-		task.delay(0.3, function() -- delay kecil supaya efek fisik sempat terlihat
+		task.delay(0.3, function()
 			if boulderModel and boulderModel.Parent then
 				boulderModel:Destroy()
 			end

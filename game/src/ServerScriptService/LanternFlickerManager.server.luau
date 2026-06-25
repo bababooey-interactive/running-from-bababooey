@@ -1,4 +1,4 @@
---!strict
+-- !strict
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 

@@ -313,7 +313,7 @@ local function beginStrike(player: Player)
 	rootPart.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
 
 	-- The Travel Time. You have exactly 0.5 seconds to step out of the snapPos.
-	local STRIKE_TIME = 0.5
+	local STRIKE_TIME = 0.25
 
 	-- Lunge slightly toward the spot
 	if flatDist > 0.1 then
@@ -343,7 +343,7 @@ local function beginStrike(player: Player)
 		-- A strict, tight impact hitbox.
 		-- It is just 2.5 studs wide. If you are not literally standing on the
 		-- exact spot the monster aimed at 0.5 seconds ago, the monster misses!
-		local IMPACT_HITBOX = 2.5
+		local IMPACT_HITBOX = 4
 
 		if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
 			-- ✅ Caught! You stood still or walked backwards into it.

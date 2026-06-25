@@ -123,7 +123,7 @@ function SensorSystem.IsPlayerInLight(playerPos: Vector3): boolean
 				local dist = (playerPos - lightPart.Position).Magnitude
 
 				-- If the player is inside the light's radius, they are visible!
-				if dist <= light.Range then
+				if dist <= light.Range * 1.25 then -- 25% further reach
 					return true
 				end
 			end
@@ -272,7 +272,7 @@ function SensorSystem.GetAwarenessForPlayer(
 					if not blocked then
 						local inLight = SensorSystem.IsPlayerInLight(playerPos)
 						local contrib = inLight and (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA
-							or (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.2
+							or (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.05
 						awareness = math.max(awareness, contrib)
 					end
 				end
