@@ -89,7 +89,7 @@ local PROP_CHANCE = 0.45
 local BOULDERLARGE_CHANCE = 0.15
 --local SHORT_WALL_CHANCE = 0.12
 local FOOD_CHANCE = 0.3 -- chance per tile floor biasa muncul food item
-local LANTERN_CHANCE = 1 -- chance per tile floor biasa muncul lantern (selain main hall)
+local LANTERN_CHANCE = 0.5 -- chance per tile floor biasa muncul lantern (selain main hall)
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
 
@@ -99,7 +99,7 @@ local PROP_SAFE_MARGIN = 3 -- offset maksimum dari pusat tile (stud), TILE_SIZE 
 -- sebelum dark zone dihitung. LANTERN_LIGHT_RADIUS dipakai untuk
 -- menentukan tile mana yang "tercover cahaya" saat menghitung dark zone.
 -- local LANTERN_MAZE_SPACING = 4 -- coba taruh lantern tiap N tile di labirin (jarak grid kasar)
-local LANTERN_SPACING = 4 -- jarak lantern di map
+local LANTERN_SPACING = 3 -- jarak lantern di map
 local LANTERN_LIGHT_RADIUS_TILES = 2 -- radius cover cahaya dalam satuan TILE (bukan stud) awalnya 2.2
 
 -- ============================================================
@@ -1094,7 +1094,7 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 	-- 2. Labirin: tersebar tiap LANTERN_MAZE_SPACING tile (kasar),
 	-- hanya di tile yang valid & belum occupied.
 	
-	for row = 1, MAP_HEIGHT do
+	for row = 1, MAP_HEIGHT, LANTERN_SPACING do
 		for col = 1, MAP_WIDTH, LANTERN_SPACING do
 			local tileType = getTile(grid, col, row)
 			local isInHall = col >= hallInfo.hallLeft
