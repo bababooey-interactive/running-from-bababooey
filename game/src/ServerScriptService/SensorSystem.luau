@@ -39,14 +39,28 @@ type NoiseEvent = {
 }
 
 local noiseEvents: { NoiseEvent } = {}
-local NOISE_LIFETIME = 3.5
+local NOISE_LIFETIME = 1.2
 
 function SensorSystem.AddNoise(player: Player, position: Vector3, level: number)
+	local clamped = math.clamp(level, 0, 1)
+	local expireAt = os.clock() + NOISE_LIFETIME
+
+	-- Replace existing event for this player if one exists
+	for _, event in ipairs(noiseEvents) do
+		if event.player == player then
+			event.position = position
+			event.level = math.max(event.level, clamped) -- keep loudest
+			event.expireAt = expireAt
+			return
+		end
+	end
+
+	-- No existing event, insert fresh
 	table.insert(noiseEvents, {
 		player = player,
 		position = position,
-		level = math.clamp(level, 0, 1),
-		expireAt = os.clock() + NOISE_LIFETIME,
+		level = clamped,
+		expireAt = expireAt,
 	})
 end
 
@@ -285,10 +299,14 @@ end
 
 function SensorSystem.GetRecentNoiseForPlayer(player: Player): number
 	cleanNoise()
+	local now = os.clock()
 	local highest = 0
 	for _, event in ipairs(noiseEvents) do
 		if event.player == player then
-			highest = math.max(highest, event.level)
+			-- fade out as the event approaches expiry
+			local age = 1 - ((event.expireAt - now) / NOISE_LIFETIME)
+			local decayed = event.level * (1 - age)
+			highest = math.max(highest, decayed)
 		end
 	end
 	return highest
