@@ -306,4 +306,34 @@ function TaskSystem.getState()
 	return taskState
 end
 
+function TaskSystem.completeTask(taskType: string, taskId: string, player: Player)
+	if taskState.won then return end
+
+	-- Guard: jangan double-complete
+	if completedTasks[taskId] then return end
+
+	if taskType == "coal" and taskState.coal_done < taskState.coal_total then
+		completedTasks[taskId] = true
+		taskState.coal_done   += 1
+		print(string.format(
+			"[TaskSystem] Coal %d/%d — oleh %s",
+			taskState.coal_done, taskState.coal_total, player.Name
+			))
+
+	elseif taskType == "lever" and taskState.lever_done < taskState.lever_total then
+		completedTasks[taskId] = true
+		taskState.lever_done  += 1
+		print(string.format(
+			"[TaskSystem] Lever %d/%d — oleh %s",
+			taskState.lever_done, taskState.lever_total, player.Name
+			))
+
+	else
+		return  -- type tidak dikenal atau sudah penuh
+	end
+
+	broadcastProgress()
+	checkWin()
+end
+
 return TaskSystem

@@ -61,5 +61,12 @@ ensureRemote("DepositCoal")
 ensureRemote("HeldItemChanged")
 ensureRemote("CoalDeposited")
 ensureRemote("HungerChanged")
+-- ── Coal interaction ─────────────────────────
+ensureRemote("PickupCoal")      -- client→server: player ambil coal (taskId)
+ensureRemote("CoalPickedUp")    -- server→client: konfirmasi pickup berhasil (taskId)
+
+-- ── Lever interaction ────────────────────────
+ensureRemote("PullLever")       -- client→server: player pull lever (taskId)
+ensureRemote("LeverPulled")     -- server→all: broadcast animasi lever (taskId)
 
 print("[RemoteSetup] Semua RemoteEvent sudah siap di ReplicatedStorage.Remotes")

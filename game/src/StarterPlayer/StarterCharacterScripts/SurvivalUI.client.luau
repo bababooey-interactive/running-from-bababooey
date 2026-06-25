@@ -545,12 +545,12 @@ end
 -- ─────────────────────────────────────────────
 local function updateTaskLabel(ui, data)
 	local function fmt(icon, done, total)
-		local color = done >= total and "#50d080" or "#cccccc"
+		local color = (done >= total and total > 0) and "#50d080" or "#cccccc"
 		return string.format("%s <font color='%s'>%d/%d</font>", icon, color, done, total)
 	end
 	ui.taskLabel.Text =
-		fmt("🪨", data.coal_done,    data.coal_total)    .. "  " ..
-		fmt("🔧", data.lever_done,   data.lever_total)
+		fmt("🪨", data.coal_done,  data.coal_total)  .. "     " ..
+		fmt("🔧", data.lever_done, data.lever_total)
 end
 
 local function updateHunger(ui, hunger)
