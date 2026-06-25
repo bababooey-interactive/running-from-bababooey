@@ -12,7 +12,7 @@ local SoundManager = require(script.Parent.SoundManager)
 local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
-local MAX_TOTAL = 8 -- including original (so max 3 clones)
+local MAX_TOTAL = 16 -- including original (so max 3 clones)
 local CLONE_SPEED = 13 -- studs/s
 local CLONE_Y = 0 -- must match MonsterAI's MONSTER_Y
 -- local TILE = 16 -- must match MapGenerator's TILE_SIZE
@@ -218,7 +218,7 @@ local function runCloneAI(clone: Model, rules: { string })
 					root.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
 				end
 
-				local STRIKE_TIME = 0.5
+				local STRIKE_TIME = 0.25
 
 				if flatDist > 0.1 then
 					local lungePos = monPos + flatDir.Unit * math.max(0, flatDist - 1.5)
@@ -239,7 +239,7 @@ local function runCloneAI(clone: Model, rules: { string })
 
 				local liveHRP = char:FindFirstChild("HumanoidRootPart")
 				if liveHRP then
-					local IMPACT_HITBOX = 2.5
+					local IMPACT_HITBOX = 4
 					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
 						cloneSounds:playHitSounds()
 						local hum2 = char:FindFirstChildOfClass("Humanoid")
@@ -329,7 +329,7 @@ function DuplicationSystem.processRules(original: Model, rules: { string })
 		return
 	end
 
-	local totalMonsters = math.min(2 ^ dupCount, MAX_TOTAL)
+	local totalMonsters = math.min(1 + dupCount, MAX_TOTAL)
 	local clonesNeeded = totalMonsters - 1
 
 	for i = 1, clonesNeeded do

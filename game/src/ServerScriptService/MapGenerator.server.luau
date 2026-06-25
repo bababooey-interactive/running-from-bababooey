@@ -24,6 +24,7 @@ local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 
@@ -98,7 +99,7 @@ local PROP_SAFE_MARGIN = 3 -- offset maksimum dari pusat tile (stud), TILE_SIZE 
 -- sebelum dark zone dihitung. LANTERN_LIGHT_RADIUS dipakai untuk
 -- menentukan tile mana yang "tercover cahaya" saat menghitung dark zone.
 -- local LANTERN_MAZE_SPACING = 4 -- coba taruh lantern tiap N tile di labirin (jarak grid kasar)
-local LANTERN_SPACING = 4 -- jarak lantern di map 
+local LANTERN_SPACING = 4 -- jarak lantern di map
 local LANTERN_LIGHT_RADIUS_TILES = 2 -- radius cover cahaya dalam satuan TILE (bukan stud) awalnya 2.2
 
 -- ============================================================
@@ -160,7 +161,7 @@ local DarkZonesFolder = MapPieces:WaitForChild("DarkZones")
 local FoodItemsFolder = MapPieces:WaitForChild("FoodItems")
 
 local WallStraight = WallsFolder:WaitForChild("wall_straight")
-local WallCorner = WallsFolder:FindFirstChild("wall_corner_90")
+-- local WallCorner = WallsFolder:FindFirstChild("wall_corner_90")
 -- local WallEndCap = WallsFolder:FindFirstChild("wall_end_cap")
 -- local WallPillar = WallsFolder:FindFirstChild("wall_pillar")
 -- local WallShort = WallsFolder:FindFirstChild("wall_short")
@@ -206,19 +207,19 @@ local DarkZoneAlley = DarkZonesFolder:WaitForChild("DarkZone_Alley") -- lorong s
 local DarkZoneCorridor = DarkZonesFolder:WaitForChild("DarkZone_Corridor") -- lorong biasa
 local DarkZoneRoom = DarkZonesFolder:WaitForChild("DarkZone_Room") -- ruangan/persimpangan lebar
 
--- ── Food Items ── 
+-- ── Food Items ──
 -- — simpan scale asli tiap item supaya ScaleTo tidak
 -- override scale manual yang sudah diset di Studio (mis. waterbottle = 0.01)
 local FoodOptions = {}
 for _, child in ipairs(FoodItemsFolder:GetChildren()) do
-    -- Simpan scale asli sebagai Attribute supaya bisa dibaca saat spawn
-    local currentScale = 1
-    if child:IsA("Model") then
-        -- Model punya Scale di bawah Pivot
-        currentScale = child:GetScale()
-    end
-    child:SetAttribute("OriginalScale", currentScale)
-    table.insert(FoodOptions, child)
+	-- Simpan scale asli sebagai Attribute supaya bisa dibaca saat spawn
+	local currentScale = 1
+	if child:IsA("Model") then
+		-- Model punya Scale di bawah Pivot
+		currentScale = child:GetScale()
+	end
+	child:SetAttribute("OriginalScale", currentScale)
+	table.insert(FoodOptions, child)
 end
 
 local BoulderOptions = {}
@@ -556,7 +557,8 @@ local function placeWall(mapFolder, col, row, dirName)
 			if part:IsA("BasePart") then
 				local oldSize = part.Size
 				local WALL_OVERLAP = 0.15
-				part.Size = Vector3.new(oldSize.X + WALL_OVERLAP, oldSize.Y * heightScaleFactor, oldSize.Z + WALL_OVERLAP)
+				part.Size =
+					Vector3.new(oldSize.X + WALL_OVERLAP, oldSize.Y * heightScaleFactor, oldSize.Z + WALL_OVERLAP)
 			end
 		end
 
@@ -635,11 +637,7 @@ local function placeFloor(mapFolder, col, row, tileType, hallInfo)
 		local TILE_OVERLAP = 0.15 -- stud, sesuaikan kalau masih ada celah
 		for _, part in ipairs(clone:GetDescendants()) do
 			if part:IsA("BasePart") then
-				part.Size = Vector3.new(
-					part.Size.X + TILE_OVERLAP,
-					part.Size.Y,
-					part.Size.Z + TILE_OVERLAP
-				)
+				part.Size = Vector3.new(part.Size.X + TILE_OVERLAP, part.Size.Y, part.Size.Z + TILE_OVERLAP)
 			end
 		end
 	end
@@ -800,7 +798,8 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 		cloneAsset(
 			BoulderLarge,
 			mapFolder,
-			CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
+				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			PROP_SCALE,
 			true
 		)
@@ -820,11 +819,7 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 				selected,
 				mapFolder,
 				CFrame.new(basePos + Vector3.new(offsetX, FLOOR_THICKNESS, offsetZ))
-					* CFrame.Angles(
-						0,
-						math.rad(math.random(0, 359)),
-						0
-					),
+					* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 				PROP_SCALE,
 				true
 			)
@@ -842,7 +837,14 @@ local function placeFireplace(mapFolder, hallInfo)
 	local fireplaceCFrame = CFrame.new(basePos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(180), 0)
 
 	if FireplaceAsset then
-		cloneAsset(FireplaceAsset, mapFolder, fireplaceCFrame, FIREPLACE_SCALE, true)
+		local placedFireplace = cloneAsset(FireplaceAsset, mapFolder, fireplaceCFrame, FIREPLACE_SCALE, true)
+		if placedFireplace then
+			for _, desc in ipairs(placedFireplace:GetDescendants()) do
+				if desc:IsA("PointLight") or desc:IsA("SpotLight") or desc:IsA("SurfaceLight") then
+					CollectionService:AddTag(desc, "MapLights")
+				end
+			end
+		end
 	else
 		local fireplaceMock = createPart(
 			"Mock_Fireplace",
@@ -939,7 +941,8 @@ local function placeCoalObjects(taskFolder, placeableTiles, level)
 		local clone = cloneAsset(
 			selected,
 			taskFolder,
-			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
+				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			COAL_SCALE,
 			true
 		)
@@ -971,7 +974,8 @@ local function placeLeverObjects(taskFolder, placeableTiles, level)
 		local clone = cloneAsset(
 			LeverAsset,
 			taskFolder,
-			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
+				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
 			LEVER_SCALE,
 			true
 		)
@@ -1010,19 +1014,21 @@ end
 
 local function placeLantern(mapFolder, col, row)
 	local basePos = gridToWorld(col, row)
-
-	-- Lantern ditempel di atas lantai
-	-- fallback ke tengah tile kalau tidak ada referensi dinding.
-	-- Untuk simplicity & supaya konsisten, kita taruh di tengah tile
-	-- dengan offset Y mengikuti tinggi wall.
-	cloneAsset(
+	local placedLantern = cloneAsset(
 		LanternAsset,
 		mapFolder,
 		CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0)),
 		LANTERN_SCALE,
 		false
 	)
-
+	-- Tag the PointLight inside the lantern so SensorSystem can find it
+	if placedLantern then
+		for _, desc in ipairs(placedLantern:GetDescendants()) do
+			if desc:IsA("PointLight") then
+				CollectionService:AddTag(desc, "MapLights")
+			end
+		end
+	end
 	markLitAround(col, row, LANTERN_LIGHT_RADIUS_TILES)
 	markOccupied(col, row)
 end
@@ -1045,13 +1051,13 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 	-- 3. Taruh lantern di sekitar FIREPLACE (misal: di baris sebelum fireplace, row + 1)
 	local fpCol = hallInfo.fireplaceCol
 	local fpRow = hallInfo.fireplaceRow
-	
+
 	-- Atau menaruh di tile sebelah kiri fireplace
 	if isInsideGrid(fpCol - 1, fpRow) and isWalkable(getTile(grid, fpCol - 1, fpRow)) then
 		placeLantern(mapFolder, fpCol - 1, fpRow)
 		markLitAround(fpCol - 1, fpRow, LANTERN_LIGHT_RADIUS_TILES)
 	end
-	
+
 	markLitAround(fpCol, fpRow, LANTERN_LIGHT_RADIUS_TILES)
 
 	-- 1. Main hall: lantern HANYA di sisi KIRI & KANAN,
@@ -1075,7 +1081,7 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 	--			-- deket spwan
 	--			local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow)
 	--			placeLantern(mapFolder, spawnPos + Vector3.new(4, FLOOR_THICKNESS, 0))
---
+	--
 	--			-- deket fireplace
 	--			local firePos = gridToWorld(hallInfo.fireplaceCol, hallInfo.fireplaceRow)
 	--			placeLantern(mapFolder, firePos + Vector3.new(-4, FLOOR_THICKNESS, 0))
@@ -1303,28 +1309,24 @@ end
 -- ============================================================
 
 local function updateSpawnLocation(hallInfo)
-    -- Cari SpawnLocation yang sudah ada di Workspace (bukan di dalam
-    -- GeneratedMap folder), pindahkan ke posisi spawn map yang benar.
-    -- Kalau tidak ada, buat baru.
-    local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow)
+	-- Cari SpawnLocation yang sudah ada di Workspace (bukan di dalam
+	-- GeneratedMap folder), pindahkan ke posisi spawn map yang benar.
+	-- Kalau tidak ada, buat baru.
+	local spawnPos = gridToWorld(hallInfo.spawnCol, hallInfo.spawnRow)
 
-    local spawnLocation = Workspace:FindFirstChildOfClass("SpawnLocation")
-    if not spawnLocation then
-        spawnLocation = Instance.new("SpawnLocation")
-        spawnLocation.Size = Vector3.new(TILE_SIZE, 1, TILE_SIZE)
-        spawnLocation.Anchored = true
-        spawnLocation.CanCollide = true
-        spawnLocation.Transparency = 1 -- tidak terlihat
-        spawnLocation.Name = "MapSpawnLocation"
-        spawnLocation.Parent = Workspace
-    end
+	local spawnLocation = Workspace:FindFirstChildOfClass("SpawnLocation")
+	if not spawnLocation then
+		spawnLocation = Instance.new("SpawnLocation")
+		spawnLocation.Size = Vector3.new(TILE_SIZE, 1, TILE_SIZE)
+		spawnLocation.Anchored = true
+		spawnLocation.CanCollide = true
+		spawnLocation.Transparency = 1 -- tidak terlihat
+		spawnLocation.Name = "MapSpawnLocation"
+		spawnLocation.Parent = Workspace
+	end
 
-    -- Taruh di permukaan floor (Y = ketebalan floor)
-    spawnLocation.CFrame = CFrame.new(
-        spawnPos.X,
-        FLOOR_THICKNESS,
-        spawnPos.Z
-    )
+	-- Taruh di permukaan floor (Y = ketebalan floor)
+	spawnLocation.CFrame = CFrame.new(spawnPos.X, FLOOR_THICKNESS, spawnPos.Z)
 end
 
 local function movePlayersToSpawn(hallInfo)
@@ -1476,6 +1478,6 @@ end
 -- ============================================================
 
 task.wait(2)
-MapGenerator.generateMap(level==10)
+MapGenerator.generateMap(level == 10)
 
 return MapGenerator

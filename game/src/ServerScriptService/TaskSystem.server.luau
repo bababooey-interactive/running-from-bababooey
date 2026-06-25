@@ -6,8 +6,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 -- local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
