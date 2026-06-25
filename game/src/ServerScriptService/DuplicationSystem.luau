@@ -140,6 +140,11 @@ local function runCloneAI(clone: Model, rules: { string })
 	local wanderTarget: Vector3? = nil
 	local lastTarget: Player? = nil
 
+	-- ✨ 1. ADD THESE SOUND VARIABLES HERE ✨
+	local walkSFX = root:FindFirstChild("FootstepSFX")
+	local roarSFX = root:FindFirstChild("RoarSFX")
+	local roarCD = 0
+
 	while clone.Parent ~= nil do
 		local dt = RunService.Heartbeat:Wait()
 
@@ -179,6 +184,17 @@ local function runCloneAI(clone: Model, rules: { string })
 			if runTrack and not runTrack.IsPlaying then
 				runTrack:Play(0.2)
 			end
+			if walkSFX then
+				walkSFX.PlaybackSpeed = 1.55
+				walkSFX.Volume = 1.0
+				if not walkSFX.IsPlaying then
+					walkSFX:Play()
+				end
+			end
+			if os.clock() > roarCD and roarSFX then
+				roarCD = os.clock() + 12
+				roarSFX:Play()
+			end
 			local char = target.Character
 			if not char then
 				continue
@@ -195,48 +211,47 @@ local function runCloneAI(clone: Model, rules: { string })
 			end
 
 			-- ✨ THE NEW SKILL-BASED CLONE CATCH SEQUENCE ✨
-			if (pos - hrp.Position).Magnitude <= catchR then
-				-- 1. Snapshot
+			-- ── Flat XZ distance (consistent with primary MonsterAI) ─────
+			local flatCPos = Vector3.new(pos.X, 0, pos.Z)
+			local flatPPos = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
+
+			if (flatCPos - flatPPos).Magnitude <= catchR then
 				local snapPos = hrp.Position
 				local monPos = root.Position
 				local flatDir = Vector3.new(snapPos.X - monPos.X, 0, snapPos.Z - monPos.Z)
 				local flatDist = flatDir.Magnitude
 
-				root.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
+				-- FIX: guard against NaN when player is directly above clone
+				if flatDist > 0.1 then
+					root.CFrame = CFrame.lookAt(monPos, monPos + flatDir.Unit)
+				end
+
 				local STRIKE_TIME = 0.5
 
-				-- 2. Play Audio & Animations
-				if jumpscareTrack then
-					jumpscareTrack:Play()
-				end
-				local jumpSound = root:FindFirstChild("JumpscareSFX")
-				if jumpSound then
-					jumpSound:Play()
-				end
-
-				-- 3. Lunge Tween
 				if flatDist > 0.1 then
 					local lungePos = monPos + flatDir.Unit * math.max(0, flatDist - 1.5)
 					TweenService:Create(
 						root,
-						TweenInfo.new(STRIKE_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+						TweenInfo.new(STRIKE_TIME, Enum.EasingStyle.Sine),
 						{ CFrame = CFrame.lookAt(lungePos, lungePos + flatDir.Unit) }
 					):Play()
 				end
 
-				-- 4. Shoot Tentacles
-				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
+				if jumpscareTrack then
+					jumpscareTrack:Play()
+				end
+				local jSFX = root:FindFirstChild("JumpscareSFX")
+				if jSFX then
+					jSFX:Play()
+				end
 
-				-- 5. Wait exactly the travel time (pauses this clone's AI)
+				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
 				task.wait(STRIKE_TIME)
 
-				-- 6. Check Dodge
 				local liveHRP = char:FindFirstChild("HumanoidRootPart")
 				if liveHRP then
 					local IMPACT_HITBOX = 2.5
-
 					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
-						-- ✅ CAUGHT!
 						local biteSound = root:FindFirstChild("BiteSFX")
 						local cutSound = root:FindFirstChild("HeadCutSFX")
 						if biteSound then
@@ -247,7 +262,6 @@ local function runCloneAI(clone: Model, rules: { string })
 								cutSound:Play()
 							end
 						end)
-
 						local hum2 = char:FindFirstChildOfClass("Humanoid")
 						if hum2 and hum2.Health > 0 then
 							hum2.Health = 0
@@ -257,12 +271,11 @@ local function runCloneAI(clone: Model, rules: { string })
 						end
 						task.wait(2)
 					else
-						-- ❌ MISSED! Player dodged!
 						task.wait(1.2)
 					end
 				end
 
-				continue -- Restart the loop to continue hunting
+				continue
 			end
 
 			-- Move toward player
@@ -288,11 +301,18 @@ local function runCloneAI(clone: Model, rules: { string })
 			if walkTrack and not walkTrack.IsPlaying then
 				walkTrack:Play(0.2)
 			end
+			if walkSFX then
+				walkSFX.PlaybackSpeed = 0.75
+				walkSFX.Volume = 0.5
+				if not walkSFX.IsPlaying then
+					walkSFX:Play()
+				end
+			end
 			-- Idle wander
 			idleTimer += 0.05
 			if idleTimer >= 3 or not wanderTarget then
 				idleTimer = 0
-				local spread = 48
+				local spread = 24
 				wanderTarget =
 					Vector3.new(pos.X + math.random(-spread, spread), CLONE_Y, pos.Z + math.random(-spread, spread))
 			end

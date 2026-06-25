@@ -367,6 +367,22 @@ end
 
 -- ── Movement ──────────────────────────────────────────────────
 
+-- Clamp a world position to stay within the generated map.
+-- margin = 1 tile inward from extreme edge (the outer ring is always walls anyway).
+local function clampToMap(pos: Vector3): Vector3
+	if not gridReady then
+		return pos
+	end
+	local ROWS = #grid
+	local COLS = grid[1] and #grid[1] or ROWS
+	local margin = TILE
+	return Vector3.new(
+		math.clamp(pos.X, margin, (COLS - 1) * TILE - margin),
+		pos.Y,
+		math.clamp(pos.Z, margin, (ROWS - 1) * TILE - margin)
+	)
+end
+
 local function stepToward(target: Vector3, speed: number, dt: number): boolean
 	local pivot = monster:GetPivot()
 	local flat = Vector3.new(target.X, pivot.Position.Y, target.Z)
@@ -378,8 +394,8 @@ local function stepToward(target: Vector3, speed: number, dt: number): boolean
 
 	local step = math.min(speed * dt, dist)
 	local newPos = pivot.Position + dir.Unit * step
+	newPos = clampToMap(newPos)
 
-	-- FIX: Smooth Turning
 	local targetRotation = CFrame.lookAt(newPos, newPos + dir.Unit)
 	local turnSpeed = state == "CHASE" and 14 or 6 -- Turns fast while chasing, slow while idle
 
@@ -615,13 +631,24 @@ mapBE.Event:Connect(function(realGrid, hallInfo)
 	grid = realGrid
 	gridReady = true
 
-	local spawnWorld = Vector3.new((hallInfo.spawnCol - 1) * TILE, MONSTER_Y, (hallInfo.spawnRow - 1) * TILE)
+	-- Dynamic radius: ~28% of map diagonal, clamped between 3–10 tiles.
+	-- Level 1 (12×12 → diag≈17): 17×0.28 ≈ 5 tiles  ← was 8, now reasonable
+	-- Level 5 (20×20 → diag≈28): 28×0.28 ≈ 8 tiles
+	-- Level 10 (32×32 → diag≈45): capped at 10 tiles
+	local ROWS = #realGrid
+	local COLS = realGrid[1] and #realGrid[1] or ROWS
+	local dynamicRadius = math.clamp(
+		math.round(math.sqrt(COLS ^ 2 + ROWS ^ 2) * 0.28),
+		3, -- never closer than 3 tiles to player
+		10 -- never farther than 10 tiles (prevents edge-spawning on big maps)
+	)
 
+	local spawnWorld = Vector3.new((hallInfo.spawnCol - 1) * TILE, MONSTER_Y, (hallInfo.spawnRow - 1) * TILE)
 	applyReachVisual()
-	spawnAtArc(spawnWorld, 8)
+	spawnAtArc(spawnWorld, dynamicRadius)
 	DuplicationSystem.processRules(monster, activeRules)
 	beginIdle()
-	print("[MonsterAI] Map loaded. Hunt begins.")
+	print(("[MonsterAI] Map loaded. Spawn radius = %d tiles."):format(dynamicRadius))
 end)
 
 print("[MonsterAI] Initialized. Waiting for map...")
