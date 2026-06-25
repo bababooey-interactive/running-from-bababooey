@@ -164,6 +164,22 @@ local function weldItemToHand(character, itemModel)
 	weld.Part1 = itemPart
 	weld.Parent = itemPart
 
+	-- Weld semua part lain di model ke part utama agar tidak runtuh
+	if itemModel:IsA("Model") then
+		for _, desc in ipairs(itemModel:GetDescendants()) do
+			if desc:IsA("BasePart") and desc ~= itemPart then
+				local internalWeld = desc:FindFirstChild("InternalWeld")
+				if not internalWeld then
+					internalWeld = Instance.new("WeldConstraint")
+					internalWeld.Name = "InternalWeld"
+					internalWeld.Part0 = itemPart
+					internalWeld.Part1 = desc
+					internalWeld.Parent = desc
+				end
+			end
+		end
+	end
+
 	return weld
 end
 
@@ -178,6 +194,15 @@ local function unweldItem(playerData)
 
 	if weld and weld.Parent then
 		weld:Destroy()
+	end
+
+	-- Hapus semua internal weld yang dibuat saat pickup
+	if model and model.Parent then
+		for _, desc in ipairs(model:GetDescendants()) do
+			if desc:IsA("WeldConstraint") and desc.Name == "InternalWeld" then
+			desc:Destroy()
+			end
+		end
 	end
 
 	-- Re-anchor & re-enable collision supaya item duduk di dunia lagi
