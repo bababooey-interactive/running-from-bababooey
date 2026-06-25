@@ -1,5 +1,6 @@
 -- AwarenessMeter.client.luau
 -- Place inside StarterPlayerScripts
+-- Redesigned to match SurvivalUI style, positioned at bottom-right
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +12,15 @@ local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE_Noise = Remotes:WaitForChild("AwarenessUpdated")
 
+-- ── Color palette (matches SurvivalUI) ────────────────────────
+local C = {
+	BG_DARK    = Color3.fromRGB(14, 14, 18),
+	BAR_BG     = Color3.fromRGB(35, 35, 42),
+	BORDER     = Color3.fromRGB(60, 60, 75),
+	TEXT_WHITE  = Color3.fromRGB(235, 235, 235),
+	TEXT_DIM    = Color3.fromRGB(150, 150, 160),
+}
+
 -- ── Build ScreenGui ───────────────────────────────────────────
 local gui = Instance.new("ScreenGui")
 gui.Name = "DetectionGui"
@@ -18,47 +28,81 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = player.PlayerGui
 
-local hud = Instance.new("Frame")
-hud.Size = UDim2.new(0, 160, 0, 46)
-hud.Position = UDim2.new(0.5, -80, 1, -60)
-hud.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-hud.BackgroundTransparency = 0.3
-hud.BorderSizePixel = 0
-hud.Parent = gui
-Instance.new("UICorner", hud).CornerRadius = UDim.new(0, 8)
+-- Container at bottom-right (mirrors SurvivalUI's bottom-left bars)
+local barsFrame = Instance.new("Frame")
+barsFrame.Name = "AwarenessBars"
+barsFrame.AnchorPoint = Vector2.new(1, 1)
+barsFrame.Position = UDim2.new(1, -12, 1, -12)
+barsFrame.Size = UDim2.new(0, 200, 0, 56)
+barsFrame.BackgroundTransparency = 1
+barsFrame.Parent = gui
 
-local function makeRow(parent, yOffset, labelText)
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 36, 0, 12)
-	label.Position = UDim2.new(0, 10, 0, yOffset)
-	label.BackgroundTransparency = 1
-	label.Text = labelText
-	label.TextColor3 = Color3.fromRGB(160, 160, 160)
-	label.TextSize = 10
-	label.Font = Enum.Font.GothamBold
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = parent
+local barsLayout = Instance.new("UIListLayout")
+barsLayout.FillDirection = Enum.FillDirection.Vertical
+barsLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+barsLayout.Padding = UDim.new(0, 5)
+barsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+barsLayout.Parent = barsFrame
 
-	local track = Instance.new("Frame")
-	track.Size = UDim2.new(1, -56, 0, 6)
-	track.Position = UDim2.new(0, 50, 0, yOffset + 3)
-	track.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	track.BorderSizePixel = 0
-	track.Parent = parent
-	Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+-- ── Bar builder (matches SurvivalUI bar style) ─────────────────
+local function makeBar(icon, barColor, layoutOrder, name)
+	local row = Instance.new("Frame")
+	row.Name = name
+	row.Size = UDim2.new(1, 0, 0, 22)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = layoutOrder
+	row.Parent = barsFrame
+
+	local iconLabel = Instance.new("TextLabel")
+	iconLabel.Name = "Icon"
+	iconLabel.Size = UDim2.new(0, 20, 1, 0)
+	iconLabel.BackgroundTransparency = 1
+	iconLabel.TextColor3 = barColor
+	iconLabel.TextSize = 14
+	iconLabel.Font = Enum.Font.GothamBold
+	iconLabel.Text = icon
+	iconLabel.TextYAlignment = Enum.TextYAlignment.Center
+	iconLabel.Parent = row
+
+	local trackBg = Instance.new("Frame")
+	trackBg.Name = "Track"
+	trackBg.Position = UDim2.new(0, 24, 0.5, -7)
+	trackBg.Size = UDim2.new(1, -24, 0, 14)
+	trackBg.BackgroundColor3 = C.BAR_BG
+	trackBg.BorderSizePixel = 0
+	trackBg.Parent = row
+
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(0, 4)
+	trackCorner.Parent = trackBg
 
 	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
 	fill.Size = UDim2.new(0, 0, 1, 0)
-	fill.BackgroundColor3 = Color3.fromRGB(90, 90, 90)
+	fill.BackgroundColor3 = barColor
 	fill.BorderSizePixel = 0
-	fill.Parent = track
-	Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+	fill.Parent = trackBg
 
-	return fill
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0, 4)
+	fillCorner.Parent = fill
+
+	local barText = Instance.new("TextLabel")
+	barText.Name = "BarText"
+	barText.Size = UDim2.new(1, 0, 1, 0)
+	barText.BackgroundTransparency = 1
+	barText.TextColor3 = C.TEXT_WHITE
+	barText.TextSize = 10
+	barText.Font = Enum.Font.GothamBold
+	barText.Text = ""
+	barText.ZIndex = 2
+	barText.Parent = trackBg
+
+	return row, fill, barText
 end
 
-local noiseFill = makeRow(hud, 10, "NOISE")
-local lightFill = makeRow(hud, 28, "LIGHT")
+local noiseRow, noiseFill, noiseText = makeBar("🔊", Color3.fromRGB(180, 120, 40), 1, "NoiseRow")
+local lightRow, lightFill, lightText = makeBar("💡", Color3.fromRGB(200, 160, 40), 2, "LightRow")
 
 -- ── Color helpers ─────────────────────────────────────────────
 local function noiseColor(t)
@@ -93,12 +137,14 @@ end
 
 -- ── Noise: from AwarenessUpdated (2nd arg is noise 0-1) ───────
 local currentNoise = 0
+local currentLight = 0
 
 RE_Noise.OnClientEvent:Connect(function(_aw, noise)
 	-- _aw is monster awareness — ignored entirely
 	currentNoise = noise or 0
 	noiseFill.BackgroundColor3 = noiseColor(currentNoise)
 	setBar(noiseFill, currentNoise)
+	noiseText.Text = currentNoise > 0.02 and string.format("%d%%", math.floor(currentNoise * 100)) or ""
 end)
 
 -- ── Light: checked locally every frame ────────────────────────
@@ -131,12 +177,15 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
+	currentLight = maxContrib
 	lightFill.BackgroundColor3 = lightColor(maxContrib)
 	setBar(lightFill, maxContrib)
+	lightText.Text = maxContrib > 0.02 and string.format("%d%%", math.floor(maxContrib * 100)) or ""
 end)
 
--- ── Hide when fully 0 (optional, keeps HUD clean) ────────────
+-- ── Hide when both bars are at 0 (keeps HUD clean) ────────────
 RunService.Heartbeat:Connect(function()
-	local anyActivity = currentNoise > 0.02
-	hud.Visible = anyActivity -- or just remove this if you want it always visible
+	local anyActivity = currentNoise > 0.02 or currentLight > 0.02
+	noiseRow.Visible = anyActivity
+	lightRow.Visible = anyActivity
 end)

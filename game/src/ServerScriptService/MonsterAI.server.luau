@@ -182,6 +182,9 @@ local lostTimer = 0
 local idleTarget: Vector3? = nil
 local spotPlayedFor: Player? = nil
 
+local graceActive = false
+local GRACE_PERIOD = 8 -- seconds the monster waits at start before activating
+
 local LOST_TIME = 5
 local IDLE_RANGE = 5 -- tiles
 
@@ -474,6 +477,20 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
+	-- Grace period: monster is visible but doesn't move or sense
+	if graceActive then
+		broadcastCD = math.max(0, broadcastCD - dt)
+		if broadcastCD <= 0 then
+			broadcastCD = 0.5
+			RE.MonsterPosition:FireAllClients({
+				position = rootPart.Position,
+				state = "IDLE",
+				monsterIndex = 1,
+			})
+		end
+		return
+	end
+
 	sensorCD += dt
 	broadcastCD = math.max(0, broadcastCD - dt)
 
@@ -647,8 +664,18 @@ mapBE.Event:Connect(function(realGrid, hallInfo)
 	applyReachVisual()
 	spawnAtArc(spawnWorld, dynamicRadius)
 	DuplicationSystem.processRules(monster, activeRules)
-	beginIdle()
-	print(("[MonsterAI] Map loaded. Spawn radius = %d tiles."):format(dynamicRadius))
+
+	-- Grace period: give players time to move before the monster activates
+	state = "IDLE"
+	chaseTarget = nil
+	idleTarget = nil
+	graceActive = true
+	task.delay(GRACE_PERIOD, function()
+		graceActive = false
+		beginIdle()
+		print("[MonsterAI] Grace period ended. Monster is now active.")
+	end)
+	print(("[MonsterAI] Map loaded. Spawn radius = %d tiles. Grace = %ds"):format(dynamicRadius, GRACE_PERIOD))
 end)
 
 print("[MonsterAI] Initialized. Waiting for map...")
