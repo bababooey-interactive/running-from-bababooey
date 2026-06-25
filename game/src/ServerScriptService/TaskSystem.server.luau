@@ -6,6 +6,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 -- local RunService = game:GetService("RunService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
@@ -204,18 +205,26 @@ local function hookTaskObject(obj: BasePart)
 	end
 
 	prompt.Triggered:Connect(function(player: Player)
-        -- play the 3D sound exactly where the object is!
-        if taskType == "coal" then
-            SoundManager.coalIntoFireplace(obj.Position)
-        elseif taskType == "lever" then
-            SoundManager.leverPull(obj.Position)
-        elseif taskType == "battery" then
-            SoundManager.batteryInsert(obj.Position)
-        end
+		-- play the 3D sound exactly where the object is!
+		if taskType == "coal" then
+			SoundManager.coalIntoFireplace(obj.Position)
+		elseif taskType == "lever" then
+			SoundManager.leverPull(obj.Position)
 
-        -- Client juga bisa trigger langsung via server-side event ini
-        onTaskInteract(player, { taskType = taskType, taskId = taskId })
-    end)
+			-- 🟢 ADDED: Animate the lever handle!
+			-- (Check both obj and obj.Parent just in case the prompt is on the base or the model)
+			local handle = obj:FindFirstChild("Lever_Handle") or obj.Parent:FindFirstChild("Lever_Handle")
+			if handle then
+				local targetCFrame = handle.CFrame * CFrame.Angles(math.rad(75), 0, 0)
+				local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+				TweenService:Create(handle, tweenInfo, { CFrame = targetCFrame }):Play()
+			end
+		elseif taskType == "battery" then
+			SoundManager.batteryInsert(obj.Position)
+		end
+
+		-- Client juga bisa trigger langsung via server-side event ini
+		onTaskInteract(player, { taskType = taskType, taskId = taskId })
 	end)
 
 	-- Disable prompt jika sudah selesai (hook buat completed-tasks)

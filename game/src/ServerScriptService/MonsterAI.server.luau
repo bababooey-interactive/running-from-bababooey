@@ -600,12 +600,12 @@ end
 
 -- ── TEST rules (remove / comment out once Gilang's system is wired) ──
 -- activeRules = {
-	-- Constants.Rules.MONSTER_HEAR,
-	-- Constants.Rules.MONSTER_SMELL,
-	-- Constants.Rules.MONSTER_SEE,
-	-- Constants.Rules.MONSTER_REACH,
-	-- Constants.Rules.MONSTER_DUPLICATE,
-}
+-- Constants.Rules.MONSTER_HEAR,
+-- Constants.Rules.MONSTER_SMELL,
+-- Constants.Rules.MONSTER_SEE,
+-- Constants.Rules.MONSTER_REACH,
+-- Constants.Rules.MONSTER_DUPLICATE,
+-- }
 applyReachVisual()
 
 -- ── Startup ───────────────────────────────────────────────────
