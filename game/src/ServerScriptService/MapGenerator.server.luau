@@ -12,7 +12,7 @@
 --    Constants.MAP_GROWTH_PER_LEVEL, MAIN_HALL_LENGTH_PER_LEVEL).
 --  - Tambah: TaskObjects (coal & lever), Lighting (lantern wajib di
 --    main hall), DarkZones (otomatis dari area tidak ter-cover
---    lantern), FoodItems (carrot & meat tersebar).
+--    lantern), FoodItems (carrot, meat & waterbottle tersebar).
 --
 --  CARA PEMANGGILAN:
 --  generateMap(level) sekarang terima parameter level (number).
@@ -70,6 +70,7 @@ local FLOOR_SCALE = TILE_SIZE / 4.025826454162598 -- ≈ 1.991
 local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ketebalan HASIL scale)
 
 local PROP_SCALE = 1.5
+local FOOD_SCALE = 1.5
 local COAL_SCALE = 2
 local LEVER_SCALE = 5
 local FIREPLACE_SCALE = 7
@@ -86,7 +87,7 @@ local SIDE_BRANCH_MAX_LENGTH = 5
 local PROP_CHANCE = 0.45
 local BOULDERLARGE_CHANCE = 0.50
 --local SHORT_WALL_CHANCE = 0.12
-local FOOD_CHANCE = 0.08 -- chance per tile floor biasa muncul food item
+local FOOD_CHANCE = 0.3 -- chance per tile floor biasa muncul food item
 local LANTERN_CHANCE = 0.4 -- chance per tile floor biasa muncul lantern (selain main hall)
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
@@ -1267,7 +1268,7 @@ local function placeFoodItems(grid, hallInfo)
 					foodFolder,
 					CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
 						* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-					1,
+					FOOD_SCALE,
 					false
 				)
 

@@ -81,10 +81,13 @@ local function getRightHand(character)
 end
 
 local function getPrimaryOrFirstPart(model)
-	if model.PrimaryPart then
-		return model.PrimaryPart
+	if model:IsA("BasePart") then    -- kalau sudah BasePart, return langsung
+		return model
 	end
-	return model:FindFirstChildWhichIsA("BasePart")
+	if model:IsA("Model") then
+		return model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	end
+	return nil
 end
 
 -- Cari fireplace di Workspace (Model bernama "old_fireplace_prop" atau
@@ -468,10 +471,22 @@ local function throwBoulder(player: Player)
             end
         end)
 
-        -- Safety timeout
-        task.delay(BOULDER_RESET_TIME, function()
-            if touchConn then touchConn:Disconnect() end
-        end)
+		touchConn:Disconnect()
+
+		-- Fire noise ke SensorSystem
+		local ok, SensorSystem = pcall(function()
+			return require(game:GetService("ServerScriptService"):FindFirstChild("SensorSystem"))
+		end)
+		if ok and SensorSystem then
+			SensorSystem.AddNoise(player, boulderPart.Position, LANDING_NOISE)
+		end
+		
+		-- Boulder langsung dihilangkan setelah mendarat (sesuai permintaan)
+		task.delay(0.3, function()  -- delay kecil supaya efek fisik sempat terlihat
+			if boulderModel and boulderModel.Parent then
+				boulderModel:Destroy()
+			end
+		end)
     end)
 end
 

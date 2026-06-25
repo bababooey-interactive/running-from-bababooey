@@ -24,6 +24,10 @@ local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 -- ── Config ─────────────────────────────────────────────────────
 local FIREPLACE_DEPOSIT_RADIUS = 12
 local PICKUP_RADIUS            = 5
+local BOULDER_NAMES = {
+	boulder_small  = true,
+	boulder_medium = true,
+}
 
 -- ── State ──────────────────────────────────────────────────────
 local heldItem     = nil
@@ -31,6 +35,8 @@ local heldCategory = nil
 local eatGui       = nil
 local depositGui   = nil
 local promptSetup  = {}
+local boulderHintGui = nil
+local isHoldingBoulder = false
 
 -- ── Helpers ────────────────────────────────────────────────────
 
@@ -155,6 +161,47 @@ local function createDepositGui()
 	depositGui = sg
 end
 
+local function createBoulderHintGui()
+    if boulderHintGui then return end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name         = "BoulderHintGui"
+    sg.ResetOnSpawn = false
+
+    local frame = Instance.new("Frame")
+    frame.Size                   = UDim2.new(0, 280, 0, 54)
+    frame.Position               = UDim2.new(0.5, -140, 0.76, 0)
+    frame.BackgroundColor3       = Color3.fromRGB(30, 30, 35)
+    frame.BackgroundTransparency = 0.15
+    frame.BorderSizePixel        = 0
+    frame.Parent                 = sg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color     = Color3.fromRGB(180, 140, 80)
+    stroke.Thickness = 2
+    stroke.Parent    = frame
+
+    local label = Instance.new("TextLabel")
+    label.Size                   = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text                   = "🪨  [Klik Kiri Mouse] Lempar  |  [Q] Drop"
+    label.TextColor3             = Color3.fromRGB(230, 200, 140)
+    label.TextScaled             = true
+    label.Font                   = Enum.Font.GothamBold
+    label.Parent                 = frame
+
+    sg.Parent = player.PlayerGui
+    boulderHintGui = sg
+end
+
+local function destroyBoulderHintGui()
+    if boulderHintGui then
+        boulderHintGui:Destroy()
+        boulderHintGui = nil
+    end
+end
+
 local function destroyDepositGui()
 	if depositGui then depositGui:Destroy(); depositGui = nil end
 end
@@ -163,10 +210,44 @@ local function destroyEatGui()
 	if eatGui then eatGui:Destroy(); eatGui = nil end
 end
 
+
 -- ── Setup ProximityPrompt per item ─────────────────────────────
 
 local function setupPrompt(model)
 	if promptSetup[model] then return end
+	-- Cek apakah ini boulder (BasePart atau Model dengan nama boulder)
+	local modelName = model.Name:lower()
+	if BOULDER_NAMES[modelName] then
+		-- Boulder pakai ProximityPrompt sederhana (server yang handle pickup)
+		local targetPart = getPrimaryOrFirstPart(model)
+		if not targetPart then return end
+
+		for _, pp in ipairs(model:IsA("Model") and model:GetDescendants() or {model}) do
+			if pp:IsA("ProximityPrompt") then pp:Destroy() end
+		end
+
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ActionText            = "Pegang"
+		prompt.ObjectText            = "🪨 " .. model.Name
+		prompt.KeyboardKeyCode       = Enum.KeyCode.E
+		prompt.HoldDuration          = 0
+		prompt.MaxActivationDistance = PICKUP_RADIUS
+		prompt.RequiresLineOfSight   = false
+		prompt.Enabled				 = true
+		prompt.Style				 = Enum.ProximityPromptStyle.Default
+		prompt.Parent                = targetPart
+
+		prompt.Triggered:Connect(function()
+			if heldItem then return end
+			RE_PickupItem:FireServer(model)
+		end)
+
+		promptSetup[model] = true
+		model.AncestryChanged:Connect(function()
+			if not model.Parent then promptSetup[model] = nil end
+		end)
+		return -- stop di sini, boulder tidak perlu flow category di bawah
+	end
 	local category = getItemCategory(model)
 	if not category then return end
 
@@ -233,6 +314,23 @@ end
 local function doScan()
 	scanFolder(Workspace:FindFirstChild("FoodItems"))
 	scanFolder(Workspace:FindFirstChild("TaskObjects"))
+	-- Boulder ada di GeneratedMap (di-spawn MapGenerator)
+	local mapFolder = Workspace:FindFirstChild("GeneratedMap")
+	if mapFolder then
+		for _, obj in ipairs(mapFolder:GetDescendants()) do
+			if obj:IsA("BasePart") and BOULDER_NAMES[obj.Name:lower()] then
+				setupPrompt(obj) -- obj adalah BasePart, setupPrompt handle ini
+			end
+		end
+		-- Watch untuk boulder yang baru muncul setelah generate
+		mapFolder.DescendantAdded:Connect(function(obj)
+			if obj:IsA("BasePart") and BOULDER_NAMES[obj.Name:lower()] then
+				task.defer(function()
+					if obj and obj.Parent then setupPrompt(obj) end
+				end)
+			end
+		end)
+	end
 end
 
 -- Watch kalau folder belum ada saat script jalan
@@ -255,13 +353,21 @@ RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category
 	if not itemModel then
 		destroyEatGui()
 		destroyDepositGui()
+		destroyBoulderHintGui()
+		isHoldingBoulder = false
 		return
 	end
 
 	if category == "food" then
 		createEatGui(itemModel)
+	elseif category == "boulder" then
+        isHoldingBoulder = true
+        createBoulderHintGui()
+        destroyEatGui()
 	else
 		destroyEatGui()
+        destroyBoulderHintGui()
+        isHoldingBoulder = false
 	end
 end)
 
@@ -286,7 +392,18 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if isNearFireplace() then RE_DepositCoal:FireServer() end
 	elseif input.KeyCode == Enum.KeyCode.Q and heldItem then
 		RE_DropItem:FireServer()
-	end
+        destroyBoulderHintGui()  -- tambahkan
+        isHoldingBoulder = false -- tambahkan
+    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if isHoldingBoulder then              -- tambahkan blok ini
+            local RE_ThrowBoulder = Remotes:FindFirstChild("ThrowBoulder")
+            if RE_ThrowBoulder then
+                RE_ThrowBoulder:FireServer()
+                destroyBoulderHintGui()
+                isHoldingBoulder = false
+            end
+        end
+    end
 end)
 
 -- ── Character refresh ──────────────────────────────────────────
@@ -295,8 +412,10 @@ player.CharacterAdded:Connect(function(newChar)
 	character    = newChar
 	heldItem     = nil
 	heldCategory = nil
+	isHoldingBoulder = false
 	destroyEatGui()
 	destroyDepositGui()
+	destroyBoulderHintGui()
 	task.wait(1)
 	doScan()
 end)
