@@ -89,7 +89,7 @@ local PROP_CHANCE = 0.45
 local BOULDERLARGE_CHANCE = 0.50
 --local SHORT_WALL_CHANCE = 0.12
 local FOOD_CHANCE = 0.3 -- chance per tile floor biasa muncul food item
-local LANTERN_CHANCE = 0.4 -- chance per tile floor biasa muncul lantern (selain main hall)
+local LANTERN_CHANCE = 0.45 -- chance per tile floor biasa muncul lantern (selain main hall)
 
 local CONVEYOR_SPEED = Constants.CONVEYOR_SPEED
 
