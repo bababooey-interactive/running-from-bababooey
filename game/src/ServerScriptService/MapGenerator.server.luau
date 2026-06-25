@@ -228,8 +228,8 @@ end
 if BoulderMedium then
 	table.insert(BoulderOptions, BoulderMedium)
 end
-if BoulderLarge then
-	table.insert(BoulderOptions, BoulderLarge)
+--if BoulderLarge then
+--	table.insert(BoulderOptions, BoulderLarge)
 end
 if FloorRubble then
 	table.insert(BoulderOptions, FloorRubble)
@@ -795,7 +795,7 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 
 	local basePos = gridToWorld(col, row)
 
-	if BoulderOptions[BoulderLarge] and math.random() < BOULDERLARGE then
+	if BoulderLarge and math.random() < BOULDERLARGE then
 		local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
 		cloneAsset(
 			BoulderLarge,
@@ -804,6 +804,7 @@ local function placeRandomProp(mapFolder, grid, col, row, tileType, hallInfo)
 			PROP_SCALE,
 			true
 		)
+		markOccupied(col, row)
 	end
 
 	if #BoulderOptions > 0 and math.random() < PROP_CHANCE then
@@ -1024,7 +1025,7 @@ local function placeLantern(mapFolder, col, row)
 	)
 
 	markLitAround(col, row, LANTERN_LIGHT_RADIUS_TILES)
-	markOccupied(col, row)
+	--markOccupied(col, row)
 end
 
 local function placeLanterns(mapFolder, grid, hallInfo)
@@ -1085,6 +1086,7 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 
 	-- 2. Labirin: tersebar tiap LANTERN_MAZE_SPACING tile (kasar),
 	-- hanya di tile yang valid & belum occupied.
+	
 	for row = 1, MAP_HEIGHT do
 		for col = 1, MAP_WIDTH, LANTERN_SPACING do
 			local tileType = getTile(grid, col, row)
@@ -1092,11 +1094,18 @@ local function placeLanterns(mapFolder, grid, hallInfo)
 				and col <= hallInfo.hallRight
 				and row >= hallInfo.endRow
 				and row <= hallInfo.startRow
-
-			if isWalkable(tileType) and not isInHall and not isOccupied(col, row) then
-				if LanternAsset and math.random() < LANTERN_CHANCE then
-					placeLantern(mapFolder, col, row)
-					markLitAround(col, row, LANTERN_LIGHT_RADIUS_TILES)
+			local lanternCount = math.random(1, 3) -- jumlah lantern per tile, acak 1-3
+			for _ = 1, lanternCount do
+				local offsetCol = col + math.random(-1, 1)
+				local offsetRow = row + math.random(-1, 1)
+				if isInsideGrid(offsetCol, offsetRow) then
+					local offsetTileType = getTile(grid, offsetCol, offsetRow)
+					if isWalkable(offsetTileType) and not isInHall and not isOccupied(offsetCol, offsetRow) then
+						if LanternAsset and math.random() < LANTERN_CHANCE then
+							placeLantern(mapFolder, offsetCol, offsetRow)
+							markLitAround(offsetCol, offsetRow, LANTERN_LIGHT_RADIUS_TILES)
+						end
+					end
 				end
 			end
 		end
@@ -1260,36 +1269,41 @@ local function placeFoodItems(grid, hallInfo)
 		for col = 1, MAP_WIDTH do
 			local tileType = getTile(grid, col, row)
 			local isFireplaceTile = col == hallInfo.fireplaceCol and row == hallInfo.fireplaceRow
+			
+			local foodCount = math.random(1, 3) -- Jumlah food per tile (acak 1-3)
+			for _ = 1, foodCount do
+				local offsetCol = col + math.random(-1, 1)
+				local offsetRow = row + math.random(-1, 1)
+				if
+					isWalkable(tileType)
+					and tileType ~= Tile.SPAWN
+					and not isFireplaceTile
+					and not isOccupied(col, row)
+					and math.random() < FOOD_CHANCE
+				then
+					local selected = FoodOptions[math.random(1, #FoodOptions)]
+					local basePos = gridToWorld(col, row)
+					local offset = getSafePropOffset(grid, offsetCol, offsetRow, PROP_SAFE_MARGIN)
 
-			if
-				isWalkable(tileType)
-				and tileType ~= Tile.SPAWN
-				and not isFireplaceTile
-				and not isOccupied(col, row)
-				and math.random() < FOOD_CHANCE
-			then
-				local selected = FoodOptions[math.random(1, #FoodOptions)]
-				local basePos = gridToWorld(col, row)
-				local offset = getSafePropOffset(grid, col, row, PROP_SAFE_MARGIN)
+					-- Hitung scale final = scale asli asset × FOOD_SCALE
+					-- Ini mempertahankan scale manual yang sudah diset di Studio
+					-- (mis. waterbottle 0.01) dan hanya mengalikannya, bukan override.
+					local originalScale = selected:GetAttribute("OriginalScale") or 1
+					local finalscale = originalScale * FOOD_SCALE
 
-				-- Hitung scale final = scale asli asset × FOOD_SCALE
-				-- Ini mempertahankan scale manual yang sudah diset di Studio
-				-- (mis. waterbottle 0.01) dan hanya mengalikannya, bukan override.
-				local originalScale = selected:GetAttribute("OriginalScale") or 1
-				local finalscale = originalScale * FOOD_SCALE
+					local clone = cloneAsset(
+						selected,
+						foodFolder,
+						CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
+							* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
+						finalscale,
+						false
+					)
 
-				local clone = cloneAsset(
-					selected,
-					foodFolder,
-					CFrame.new(basePos + offset + Vector3.new(0, FLOOR_THICKNESS, 0))
-						* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-					finalscale,
-					false
-				)
-
-				--hookFoodItem(clone)
-				clone:SetAttribute("ItemCategory", "food")
-				markOccupied(col, row)
+					--hookFoodItem(clone)
+					clone:SetAttribute("ItemCategory", "food")
+					--markOccupied(col, row)
+				end
 			end
 		end
 	end
