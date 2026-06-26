@@ -31,13 +31,13 @@ local Workspace = game:GetService("Workspace")
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local RE_PickupItem      = Remotes:WaitForChild("PickupItem")
-local RE_DropItem        = Remotes:WaitForChild("DropItem")
-local RE_EatFood         = Remotes:WaitForChild("EatFood")
-local RE_DepositCoal     = Remotes:WaitForChild("DepositCoal")
+local RE_PickupItem = Remotes:WaitForChild("PickupItem")
+local RE_DropItem = Remotes:WaitForChild("DropItem")
+local RE_EatFood = Remotes:WaitForChild("EatFood")
+local RE_DepositCoal = Remotes:WaitForChild("DepositCoal")
 local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
-local RE_HungerChanged   = Remotes:WaitForChild("HungerChanged")
-local RE_ThrowBoulder    = Remotes:WaitForChild("ThrowBoulder")
+local RE_HungerChanged = Remotes:WaitForChild("HungerChanged")
+local RE_ThrowBoulder = Remotes:WaitForChild("ThrowBoulder")
 
 local SoundManager = require(script.Parent.SoundManager)
 
@@ -45,21 +45,22 @@ local SoundManager = require(script.Parent.SoundManager)
 -- TaskSystem.luau adalah ModuleScript di ServerScriptService,
 -- bukan server script. Bisa di-require dari script manapun di server.
 local TaskSystem = require(script.Parent.TaskSystem)
+local SensorSystem = require(script.Parent.SensorSystem)
 
 -- ── Config ─────────────────────────────────────────────────────
 local HUNGER_RESTORE = {
-	carrot      = 20,
-	meat        = 40,
+	carrot = 20,
+	meat = 40,
 	waterbottle = 15,
 }
-local HUNGER_RESTORE_DEFAULT   = 25
+local HUNGER_RESTORE_DEFAULT = 25
 local FIREPLACE_DEPOSIT_RADIUS = 12
-local THROW_FORCE              = 65
-local THROW_ARC                = 15
-local LANDING_NOISE            = 0.85
-local BOULDER_RESET_TIME       = 8
-local THROWABLE_BOULDER_NAMES  = {
-	boulder_small  = true,
+local THROW_FORCE = 65
+local THROW_ARC = 15
+local LANDING_NOISE = 0.85
+local BOULDER_RESET_TIME = 8
+local THROWABLE_BOULDER_NAMES = {
+	boulder_small = true,
 	boulder_medium = true,
 }
 local CARRY_WELD_OFFSET = CFrame.new(0, -0.15, -1.2) * CFrame.Angles(math.rad(-20), 0, 0)
@@ -74,7 +75,9 @@ local function getRightHand(character)
 end
 
 local function getPrimaryOrFirstPart(model)
-	if model:IsA("BasePart") then return model end
+	if model:IsA("BasePart") then
+		return model
+	end
 	if model:IsA("Model") then
 		return model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
 	end
@@ -90,59 +93,77 @@ local function findFireplace()
 			end
 		end
 	end
-	return Workspace:FindFirstChild("old_fireplace_prop")
+	-- Search deeper in Workspace (e.g. MapPieces.Props)
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc:IsA("Model") and desc.Name:lower():find("fireplace") then
+			return desc
+		end
+	end
+	return nil
 end
 
 local function getFireplacePosition()
 	local fp = findFireplace()
-	if not fp then return nil end
+	if not fp then
+		return nil
+	end
 	local part = getPrimaryOrFirstPart(fp)
-	if part then return part.Position end
+	if part then
+		return part.Position
+	end
 	-- Fallback: pakai pivot position (works even tanpa PrimaryPart)
 	return fp:GetPivot().Position
 end
 
 local function isNearFireplace(character)
 	local root = character:FindFirstChild("HumanoidRootPart")
-	if not root then return false end
+	if not root then
+		return false
+	end
 	local fpPos = getFireplacePosition()
-	if not fpPos then return false end
+	if not fpPos then
+		return false
+	end
 	return (root.Position - fpPos).Magnitude <= FIREPLACE_DEPOSIT_RADIUS
 end
 
 local function weldItemToHand(character, itemModel)
 	local hand = getRightHand(character)
-	if not hand then return nil end
+	if not hand then
+		return nil
+	end
 
 	local itemPart = getPrimaryOrFirstPart(itemModel)
-	if not itemPart then return nil end
+	if not itemPart then
+		return nil
+	end
 
 	for _, desc in ipairs(itemModel:GetDescendants()) do
 		if desc:IsA("BasePart") then
-			desc.Anchored   = false
+			desc.Anchored = false
 			desc.CanCollide = false
 		end
 	end
-	itemPart.Anchored   = false
+	itemPart.Anchored = false
 	itemPart.CanCollide = false
 
 	itemModel:PivotTo(hand.CFrame * CARRY_WELD_OFFSET)
 
-	local weld      = Instance.new("WeldConstraint")
-	weld.Name       = "CarryWeld"
-	weld.Part0      = hand
-	weld.Part1      = itemPart
-	weld.Parent     = itemPart
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "CarryWeld"
+	weld.Part0 = hand
+	weld.Part1 = itemPart
+	weld.Parent = itemPart
 
 	if itemModel:IsA("Model") then
 		for _, desc in ipairs(itemModel:GetDescendants()) do
 			if desc:IsA("BasePart") and desc ~= itemPart then
 				local iw = desc:FindFirstChild("InternalWeld")
 				if not iw then
-					iw        = Instance.new("WeldConstraint")
-					iw.Name   = "InternalWeld"
-					iw.Part0  = itemPart
-					iw.Part1  = desc
+					iw = Instance.new("WeldConstraint")
+					iw.Name = "InternalWeld"
+					iw.Part0 = itemPart
+					iw.Part1 = desc
 					iw.Parent = desc
 				end
 			end
@@ -153,11 +174,15 @@ local function weldItemToHand(character, itemModel)
 end
 
 local function unweldItem(playerData)
-	if not playerData then return end
+	if not playerData then
+		return
+	end
 	local model = playerData.model
-	local weld  = playerData.weld
+	local weld = playerData.weld
 
-	if weld and weld.Parent then weld:Destroy() end
+	if weld and weld.Parent then
+		weld:Destroy()
+	end
 
 	if model and model.Parent then
 		for _, desc in ipairs(model:GetDescendants()) do
@@ -167,13 +192,13 @@ local function unweldItem(playerData)
 		end
 		for _, desc in ipairs(model:GetDescendants()) do
 			if desc:IsA("BasePart") then
-				desc.Anchored   = true
+				desc.Anchored = true
 				desc.CanCollide = true
 			end
 		end
 		local primary = getPrimaryOrFirstPart(model)
 		if primary then
-			primary.Anchored   = true
+			primary.Anchored = true
 			primary.CanCollide = true
 		end
 	end
@@ -181,7 +206,7 @@ end
 
 local function restoreHunger(player, foodName)
 	local restore = HUNGER_RESTORE[foodName:lower()] or HUNGER_RESTORE_DEFAULT
-	local stats   = player:FindFirstChild("Hunger")
+	local stats = player:FindFirstChild("Hunger")
 		or (player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Hunger"))
 	if stats and stats:IsA("NumberValue") then
 		stats.Value = math.min(100, stats.Value + restore)
@@ -193,9 +218,15 @@ end
 -- ── Core: Pickup ───────────────────────────────────────────────
 
 local function pickupItem(player, itemModel)
-	if not player.Character then return false, "no_character" end
-	if not itemModel or not itemModel.Parent then return false, "item_gone" end
-	if heldItems[player] then return false, "already_holding" end
+	if not player.Character then
+		return false, "no_character"
+	end
+	if not itemModel or not itemModel.Parent then
+		return false, "item_gone"
+	end
+	if heldItems[player] then
+		return false, "already_holding"
+	end
 
 	local category
 	local taskType = itemModel:GetAttribute("TaskType")
@@ -222,10 +253,14 @@ local function pickupItem(player, itemModel)
 		end
 	end
 
-	if not category then return false, "unknown_category" end
+	if not category then
+		return false, "unknown_category"
+	end
 
 	for _, pp in ipairs(itemModel:GetDescendants()) do
-		if pp:IsA("ProximityPrompt") then pp.Enabled = false end
+		if pp:IsA("ProximityPrompt") then
+			pp.Enabled = false
+		end
 	end
 
 	itemModel.Parent = player.Character
@@ -234,7 +269,9 @@ local function pickupItem(player, itemModel)
 	if not weld then
 		itemModel.Parent = Workspace
 		for _, pp in ipairs(itemModel:GetDescendants()) do
-			if pp:IsA("ProximityPrompt") then pp.Enabled = true end
+			if pp:IsA("ProximityPrompt") then
+				pp.Enabled = true
+			end
 		end
 		return false, "weld_failed"
 	end
@@ -245,6 +282,8 @@ local function pickupItem(player, itemModel)
 	local char = player.Character
 	if char and char.PrimaryPart then
 		SoundManager.playAt(SoundManager.Ids.ItemPickup, char.PrimaryPart.Position, 0.8, 30)
+		-- Noise event so monster can hear the pickup
+		SensorSystem.AddNoise(player, char.PrimaryPart.Position, 0.5)
 	end
 	print(string.format("[ItemPickup] %s pickup %s (%s)", player.Name, itemModel.Name, category))
 	return true
@@ -254,7 +293,9 @@ end
 
 local function dropItem(player)
 	local data = heldItems[player]
-	if not data then return end
+	if not data then
+		return
+	end
 
 	unweldItem(data)
 
@@ -274,7 +315,22 @@ local function dropItem(player)
 			data.model.Parent = foodFolder or Workspace
 		end
 		for _, pp in ipairs(data.model:GetDescendants()) do
-			if pp:IsA("ProximityPrompt") then pp.Enabled = true end
+			if pp:IsA("ProximityPrompt") then
+				pp.Enabled = true
+			end
+		end
+
+		-- Sound & area noise when item hits the ground
+		local dropPos = data.model:GetPivot().Position
+		if data.category == "coal" then
+			SoundManager.coalDrop(dropPos)
+			SensorSystem.AddAreaNoise(dropPos, 0.5, 30)
+		elseif data.category == "boulder" then
+			SoundManager.coalThrowHit(dropPos)
+			SensorSystem.AddAreaNoise(dropPos, 0.7, 35)
+		else
+			SoundManager.itemDrop(dropPos)
+			SensorSystem.AddAreaNoise(dropPos, 0.35, 25)
 		end
 	end
 
@@ -287,11 +343,15 @@ end
 
 local function eatFood(player)
 	local data = heldItems[player]
-	if not data or data.category ~= "food" then return end
+	if not data or data.category ~= "food" then
+		return
+	end
 
 	local foodName = data.model and data.model.Name or "unknown"
 	unweldItem(data)
-	if data.model and data.model.Parent then data.model:Destroy() end
+	if data.model and data.model.Parent then
+		data.model:Destroy()
+	end
 
 	heldItems[player] = nil
 	RE_HeldItemChanged:FireAllClients(player, nil, nil)
@@ -302,7 +362,9 @@ end
 
 local function depositCoal(player)
 	local data = heldItems[player]
-	if not data or data.category ~= "coal" then return end
+	if not data or data.category ~= "coal" then
+		return
+	end
 
 	-- Server verify: player harus dekat fireplace
 	if not player.Character or not isNearFireplace(player.Character) then
@@ -310,7 +372,7 @@ local function depositCoal(player)
 		return
 	end
 
-	local coalModel  = data.model
+	local coalModel = data.model
 	local coalTaskId = coalModel and coalModel:GetAttribute("TaskId") or nil
 
 	-- Destroy coal sebelum unweld (cegah physics glitch)
@@ -341,21 +403,22 @@ local function depositCoal(player)
 		SoundManager.coalIntoFireplace(fpPos)
 	end
 
-	print(string.format(
-		"[ItemPickup] %s deposit coal (TaskId=%s) ke fireplace ✓",
-		player.Name, tostring(coalTaskId)
-	))
+	print(string.format("[ItemPickup] %s deposit coal (TaskId=%s) ke fireplace ✓", player.Name, tostring(coalTaskId)))
 end
 
 -- ── Core: Throw Boulder ────────────────────────────────────────
 
 local function throwBoulder(player: Player)
 	local data = heldItems[player]
-	if not data or data.category ~= "boulder" then return end
+	if not data or data.category ~= "boulder" then
+		return
+	end
 
 	local boulderModel = data.model
-	local boulderPart  = getPrimaryOrFirstPart(boulderModel)
-	if not boulderPart then return end
+	local boulderPart = getPrimaryOrFirstPart(boulderModel)
+	if not boulderPart then
+		return
+	end
 
 	unweldItem(data)
 	heldItems[player] = nil
@@ -365,7 +428,7 @@ local function throwBoulder(player: Player)
 
 	for _, desc in ipairs(boulderModel:GetDescendants()) do
 		if desc:IsA("BasePart") then
-			desc.Anchored   = false
+			desc.Anchored = false
 			desc.CanCollide = true
 		end
 	end
@@ -373,41 +436,48 @@ local function throwBoulder(player: Player)
 
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
+	if not root then
+		return
+	end
 
 	local arcRad = math.rad(THROW_ARC)
 	local forward = root.CFrame.LookVector
-	local right   = forward:Cross(Vector3.new(0, 1, 0)).Unit
-	local arcDir  = (CFrame.fromAxisAngle(right, arcRad) * forward).Unit
+	local right = forward:Cross(Vector3.new(0, 1, 0)).Unit
+	local arcDir = (CFrame.fromAxisAngle(right, arcRad) * forward).Unit
 
 	boulderPart.AssemblyLinearVelocity = arcDir * THROW_FORCE
 
 	local touchConn
 	touchConn = boulderPart.Touched:Connect(function(hit)
-		if char and hit:IsDescendantOf(char) then return end
-		if boulderPart.AssemblyLinearVelocity.Magnitude > 5 then return end
+		if char and hit:IsDescendantOf(char) then
+			return
+		end
+		if boulderPart.AssemblyLinearVelocity.Magnitude > 5 then
+			return
+		end
 
 		touchConn:Disconnect()
 
-		local ok, SensorSystem = pcall(function()
-			return require(game:GetService("ServerScriptService"):FindFirstChild("SensorSystem"))
-		end)
-		if ok and SensorSystem then
-			SensorSystem.AddNoise(player, boulderPart.Position, LANDING_NOISE)
-			print(string.format("[ItemPickup] Boulder %s mendarat — noise fired", player.Name))
-		end
+		-- Landing sound + area noise (boulder hits ground hard)
+		SoundManager.coalThrowHit(boulderPart.Position)
+		SensorSystem.AddAreaNoise(boulderPart.Position, LANDING_NOISE, 40)
+		print(string.format("[ItemPickup] Boulder %s mendarat — noise + sound fired", player.Name))
 
 		task.delay(BOULDER_RESET_TIME, function()
 			if boulderPart and boulderPart.Parent then
-				boulderPart.Anchored              = true
+				boulderPart.Anchored = true
 				boulderPart.AssemblyLinearVelocity = Vector3.zero
 				local mapFolder = Workspace:FindFirstChild("GeneratedMap")
-				if mapFolder then boulderModel.Parent = mapFolder end
+				if mapFolder then
+					boulderModel.Parent = mapFolder
+				end
 			end
 		end)
 
 		task.delay(0.3, function()
-			if boulderModel and boulderModel.Parent then boulderModel:Destroy() end
+			if boulderModel and boulderModel.Parent then
+				boulderModel:Destroy()
+			end
 		end)
 	end)
 end
@@ -415,7 +485,9 @@ end
 -- ── Remote Connections ─────────────────────────────────────────
 
 RE_PickupItem.OnServerEvent:Connect(function(player, itemModel)
-	if typeof(itemModel) ~= "Instance" then return end
+	if typeof(itemModel) ~= "Instance" then
+		return
+	end
 	pickupItem(player, itemModel)
 end)
 
@@ -441,7 +513,9 @@ Players.PlayerRemoving:Connect(function(player)
 	local data = heldItems[player]
 	if data then
 		unweldItem(data)
-		if data.model and data.model.Parent then data.model:Destroy() end
+		if data.model and data.model.Parent then
+			data.model:Destroy()
+		end
 		heldItems[player] = nil
 	end
 end)
@@ -451,7 +525,9 @@ Players.PlayerAdded:Connect(function(player)
 		local data = heldItems[player]
 		if data then
 			unweldItem(data)
-			if data.model and data.model.Parent then data.model:Destroy() end
+			if data.model and data.model.Parent then
+				data.model:Destroy()
+			end
 			heldItems[player] = nil
 			RE_HeldItemChanged:FireAllClients(player, nil, nil)
 		end

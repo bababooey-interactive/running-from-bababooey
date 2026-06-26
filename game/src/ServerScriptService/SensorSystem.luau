@@ -64,6 +64,36 @@ function SensorSystem.AddNoise(player: Player, position: Vector3, level: number)
 	})
 end
 
+-- ─── Area Noise ──────────────────────────────────────────────
+-- Creates noise events for ALL players within `radius` of `position`.
+-- Closer players get higher noise (linear falloff).
+-- Used for loud world events like lever pulls, item drops, etc.
+
+function SensorSystem.AddAreaNoise(position: Vector3, level: number, radius: number)
+	local Players = game:GetService("Players")
+	local clamped = math.clamp(level, 0, 1)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		if not char then
+			continue
+		end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if not hrp then
+			continue
+		end
+
+		local dist = (hrp.Position - position).Magnitude
+		if dist <= radius then
+			local distanceFactor = 1 - (dist / radius)
+			local noiseLevel = clamped * distanceFactor
+			if noiseLevel > 0.05 then
+				SensorSystem.AddNoise(player, position, noiseLevel)
+			end
+		end
+	end
+end
+
 local function cleanNoise()
 	local now = os.clock()
 	for i = #noiseEvents, 1, -1 do

@@ -11,6 +11,7 @@ local TweenService = game:GetService("TweenService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
+local SensorSystem = require(script.Parent.SensorSystem)
 
 -- ─────────────────────────────────────────────
 --  RemoteEvents  (buat folder Remotes di ReplicatedStorage)
@@ -231,6 +232,12 @@ local function onTaskInteract(player: Player, payload: { taskType: string, taskI
 		local leverModel = findLeverModel(taskId)
 		if leverModel then
 			animateLever(leverModel)
+
+			-- Area noise: all players near the lever hear it — closer = louder noise bar
+			local leverBase = leverModel:FindFirstChild("Lever_Base")
+			if leverBase and leverBase:IsA("BasePart") then
+				SensorSystem.AddAreaNoise(leverBase.Position, 1.0, 50)
+			end
 		end
 
 	--elseif taskType == "battery" and taskState.battery_done < taskState.battery_total then
@@ -363,29 +370,34 @@ function TaskSystem.getState()
 end
 
 function TaskSystem.completeTask(taskType: string, taskId: string, player: Player)
-	if taskState.won then return end
+	if taskState.won then
+		return
+	end
 
 	-- Guard: jangan double-complete
-	if completedTasks[taskId] then return end
+	if completedTasks[taskId] then
+		return
+	end
 
 	if taskType == "coal" and taskState.coal_done < taskState.coal_total then
 		completedTasks[taskId] = true
-		taskState.coal_done   += 1
-		print(string.format(
-			"[TaskSystem] Coal %d/%d — oleh %s",
-			taskState.coal_done, taskState.coal_total, player.Name
-			))
-
+		taskState.coal_done += 1
+		print(
+			string.format("[TaskSystem] Coal %d/%d — oleh %s", taskState.coal_done, taskState.coal_total, player.Name)
+		)
 	elseif taskType == "lever" and taskState.lever_done < taskState.lever_total then
 		completedTasks[taskId] = true
-		taskState.lever_done  += 1
-		print(string.format(
-			"[TaskSystem] Lever %d/%d — oleh %s",
-			taskState.lever_done, taskState.lever_total, player.Name
-			))
-
+		taskState.lever_done += 1
+		print(
+			string.format(
+				"[TaskSystem] Lever %d/%d — oleh %s",
+				taskState.lever_done,
+				taskState.lever_total,
+				player.Name
+			)
+		)
 	else
-		return  -- type tidak dikenal atau sudah penuh
+		return -- type tidak dikenal atau sudah penuh
 	end
 
 	broadcastProgress()

@@ -110,6 +110,10 @@ end
 function SoundManager.batteryInsert(position: Vector3)
 	SoundManager.playAt(SoundManager.Ids.BatteryInsert, position, 0.6, 30)
 end
+function SoundManager.itemDrop(position: Vector3)
+	-- Generic item drop thud (food, lantern, misc) — lighter than coal
+	SoundManager.playAt(SoundManager.Ids.CoalDrop, position, 0.5, 25)
+end
 
 -- ─────────────────────────────────────────────────────────────
 --  MONSTER SOUND CONTROLLER

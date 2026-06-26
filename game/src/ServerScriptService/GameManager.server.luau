@@ -17,12 +17,12 @@
 --    di Constants.luau).
 -- =============================================================
 
-local Players           = game:GetService("Players")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TeleportService   = game:GetService("TeleportService")
+local TeleportService = game:GetService("TeleportService")
 
-local Constants      = require(ReplicatedStorage.Shared.Constants)
-local TaskSystem     = require(script.Parent.TaskSystem)
+local Constants = require(ReplicatedStorage.Shared.Constants)
+local TaskSystem = require(script.Parent.TaskSystem)
 local SurvivalSystem = require(script.Parent.SurvivalSystem)
 
 -- ─────────────────────────────────────────────
@@ -30,19 +30,19 @@ local SurvivalSystem = require(script.Parent.SurvivalSystem)
 --  Pick `count` rule unik dari Constants.RULES_POOL (no-repeat).
 --  Kalau count >= jumlah pool, return semua pool apa adanya.
 -- ─────────────────────────────────────────────
-local function pickRandomRules(count: number): {string}
-    local pool = table.clone(Constants.RULES_POOL)
-    local picked = {}
+local function pickRandomRules(count: number): { string }
+	local pool = table.clone(Constants.RULES_POOL)
+	local picked = {}
 
-    count = math.min(count, #pool)
+	count = math.min(count, #pool)
 
-    for _ = 1, count do
-        local index = math.random(1, #pool)
-        table.insert(picked, pool[index])
-        table.remove(pool, index)
-    end
+	for _ = 1, count do
+		local index = math.random(1, #pool)
+		table.insert(picked, pool[index])
+		table.remove(pool, index)
+	end
 
-    return picked
+	return picked
 end
 
 -- ─────────────────────────────────────────────
@@ -54,13 +54,13 @@ end
 --  ini kalau Arkan punya definisi pasti berapa banyak stack per level.
 -- ─────────────────────────────────────────────
 local function getDuplicateStackCount(level: number): number
-    local poolSize = #Constants.RULES_POOL -- 8
+	local poolSize = #Constants.RULES_POOL -- 8
 
-    if level <= poolSize then
-        return 0
-    end
+	if level <= poolSize then
+		return 0
+	end
 
-    return math.floor((level - poolSize - 1) / poolSize) + 1
+	return math.floor((level - poolSize - 1) / poolSize) + 1
 end
 
 -- ─────────────────────────────────────────────
@@ -72,26 +72,24 @@ end
 --    MonsterAI yang nge-loop rules bisa lihat "monster_duplicate" lebih
 --    dari sekali kalau mereka memang count occurrence-nya)
 -- ─────────────────────────────────────────────
-local function generateRulesForLevel(level: number): {string}
-    if Constants.NIGHTMARE_EVERY_N_LEVELS > 0
-        and level % Constants.NIGHTMARE_EVERY_N_LEVELS == 0
-    then
-        return table.clone(Constants.NIGHTMARE_RULES)
-    end
+local function generateRulesForLevel(level: number): { string }
+	if Constants.NIGHTMARE_EVERY_N_LEVELS > 0 and level % Constants.NIGHTMARE_EVERY_N_LEVELS == 0 then
+		return table.clone(Constants.NIGHTMARE_RULES)
+	end
 
-    if level <= #Constants.RULES_POOL then
-        return pickRandomRules(level)
-    end
+	if level <= #Constants.RULES_POOL then
+		return pickRandomRules(level)
+	end
 
-    -- Level 9+: semua rule unik aktif + stack tambahan untuk duplicate
-    local rules = table.clone(Constants.RULES_POOL)
-    local extraStacks = getDuplicateStackCount(level)
+	-- Level 9+: semua rule unik aktif + stack tambahan untuk duplicate
+	local rules = table.clone(Constants.RULES_POOL)
+	local extraStacks = getDuplicateStackCount(level)
 
-    for _ = 1, extraStacks do
-        table.insert(rules, Constants.Rules.MONSTER_DUPLICATE)
-    end
+	for _ = 1, extraStacks do
+		table.insert(rules, Constants.Rules.MONSTER_DUPLICATE)
+	end
 
-    return rules
+	return rules
 end
 
 -- ─────────────────────────────────────────────
@@ -100,27 +98,27 @@ end
 --
 --  Fallback: level 1, rules di-random dari pool (bukan hardcode lagi)
 -- ─────────────────────────────────────────────
-local function getSessionData(): {level: number, rules: {string}, mode: string}
-    -- Ambil dari player pertama yang masuk
-    local firstPlayer = Players:GetPlayers()[1]
-    if firstPlayer then
-        local ok, data = pcall(function()
-            return TeleportService:GetLocalPlayerTeleportData()
-        end)
-        -- Note: GetLocalPlayerTeleportData hanya tersedia di LocalScript.
-        -- Untuk server, gunakan pendekatan via DataStore atau BindableEvent dari lobby.
-        -- Sementara fallback ke default di bawah:
-    end
+local function getSessionData(): { level: number, rules: { string }, mode: string }
+	-- Ambil dari player pertama yang masuk
+	local firstPlayer = Players:GetPlayers()[1]
+	if firstPlayer then
+		local ok, data = pcall(function()
+			return TeleportService:GetLocalPlayerTeleportData()
+		end)
+		-- Note: GetLocalPlayerTeleportData hanya tersedia di LocalScript.
+		-- Untuk server, gunakan pendekatan via DataStore atau BindableEvent dari lobby.
+		-- Sementara fallback ke default di bawah:
+	end
 
-    -- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
-    -- TODO: ganti level di sini untuk testing manual level berapa pun
-    local level = 10
+	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
+	-- TODO: ganti level di sini untuk testing manual level berapa pun
+	local level = 2
 
-    return {
-        level = level,
-        rules = generateRulesForLevel(level),
-        mode  = Constants.GameMode.REGULAR,
-    }
+	return {
+		level = level,
+		rules = generateRulesForLevel(level),
+		mode = Constants.GameMode.REGULAR,
+	}
 end
 
 -- ─────────────────────────────────────────────
@@ -165,12 +163,14 @@ math.randomseed(os.time())
 
 local session = getSessionData()
 
-print(string.format(
-    "[GameManager] Sesi dimulai — Level: %d | Mode: %s | Rules: %s",
-    session.level,
-    session.mode,
-    table.concat(session.rules, ", ")
-))
+print(
+	string.format(
+		"[GameManager] Sesi dimulai — Level: %d | Mode: %s | Rules: %s",
+		session.level,
+		session.mode,
+		table.concat(session.rules, ", ")
+	)
+)
 
 -- Init task system dulu (task objects di-hook)
 TaskSystem.init(session.level)
@@ -183,32 +183,32 @@ SurvivalSystem.init(session.rules)
 --  agar client bisa tahu rules mana yang aktif
 -- ─────────────────────────────────────────────
 local sessionInfo = Instance.new("Folder")
-sessionInfo.Name   = "SessionInfo"
+sessionInfo.Name = "SessionInfo"
 sessionInfo.Parent = ReplicatedStorage
 
 local levelVal = Instance.new("IntValue")
-levelVal.Name   = "Level"
-levelVal.Value  = session.level
+levelVal.Name = "Level"
+levelVal.Value = session.level
 levelVal.Parent = sessionInfo
 
 local modeVal = Instance.new("StringValue")
-modeVal.Name   = "Mode"
-modeVal.Value  = session.mode
+modeVal.Name = "Mode"
+modeVal.Value = session.mode
 modeVal.Parent = sessionInfo
 
 local rulesFolder = Instance.new("Folder")
-rulesFolder.Name   = "ActiveRules"
+rulesFolder.Name = "ActiveRules"
 rulesFolder.Parent = sessionInfo
 
 for i, rule in ipairs(session.rules) do
-    local v = Instance.new("StringValue")
-    -- Name dibuat unik (rule .. index) supaya MONSTER_DUPLICATE yang
-    -- di-stack lebih dari sekali tidak saling menimpa di bawah Folder
-    -- yang sama (2 child tidak boleh nama sama persis kalau mau
-    -- di-:GetChildren() dengan aman satu-satu).
-    v.Name   = rule .. "_" .. i
-    v.Value  = rule
-    v.Parent = rulesFolder
+	local v = Instance.new("StringValue")
+	-- Name dibuat unik (rule .. index) supaya MONSTER_DUPLICATE yang
+	-- di-stack lebih dari sekali tidak saling menimpa di bawah Folder
+	-- yang sama (2 child tidak boleh nama sama persis kalau mau
+	-- di-:GetChildren() dengan aman satu-satu).
+	v.Name = rule .. "_" .. i
+	v.Value = rule
+	v.Parent = rulesFolder
 end
 
 -- ─────────────────────────────────────────────
@@ -265,15 +265,15 @@ local RulesBindable = Remotes:FindFirstChild("RulesBindable")
 -- bukan BindableEvent (mis. sisa RemoteEvent dari percobaan lain),
 -- buang dan buat ulang yang benar, daripada crash diam-diam.
 if RulesBindable and not RulesBindable:IsA("BindableEvent") then
-    warn("[GameManager] Instance 'RulesBindable' ditemukan tapi bukan BindableEvent, akan dibuat ulang.")
-    RulesBindable:Destroy()
-    RulesBindable = nil
+	warn("[GameManager] Instance 'RulesBindable' ditemukan tapi bukan BindableEvent, akan dibuat ulang.")
+	RulesBindable:Destroy()
+	RulesBindable = nil
 end
 
 if not RulesBindable then
-    RulesBindable = Instance.new("BindableEvent")
-    RulesBindable.Name   = "RulesBindable"
-    RulesBindable.Parent = Remotes
+	RulesBindable = Instance.new("BindableEvent")
+	RulesBindable.Name = "RulesBindable"
+	RulesBindable.Parent = Remotes
 end
 
 RulesBindable:Fire(session.rules)
