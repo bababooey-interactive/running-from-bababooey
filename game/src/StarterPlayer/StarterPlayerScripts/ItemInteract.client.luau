@@ -50,7 +50,7 @@ local function getPrimaryOrFirstPart(model)
 	if model.PrimaryPart then
 		return model.PrimaryPart
 	end
-	return model:FindFirstChildWhichIsA("BasePart")
+	return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function findFireplacePosition()
@@ -62,6 +62,8 @@ local function findFireplacePosition()
 				if part then
 					return part.Position
 				end
+				-- Fallback: pakai pivot position
+				return child:GetPivot().Position
 			end
 		end
 	end
@@ -71,6 +73,8 @@ local function findFireplacePosition()
 		if part then
 			return part.Position
 		end
+		-- Fallback: pakai pivot position
+		return fp:GetPivot().Position
 	end
 	return nil
 end
