@@ -237,6 +237,7 @@ local function onTaskInteract(player: Player, payload: { taskType: string, taskI
 			local leverBase = leverModel:FindFirstChild("Lever_Base")
 			if leverBase and leverBase:IsA("BasePart") then
 				SensorSystem.AddAreaNoise(leverBase.Position, 1.0, 50)
+				SensorSystem.AddWorldNoise(leverBase.Position, 1.0)
 			end
 		end
 

@@ -32,7 +32,7 @@ end)
 -- ─── Noise Store ──────────────────────────────────────────────
 
 type NoiseEvent = {
-	player: Player,
+	player: Player?, -- nil for anonymous/world noise (lever, boulder, etc.)
 	position: Vector3,
 	level: number,
 	expireAt: number,
@@ -92,6 +92,38 @@ function SensorSystem.AddAreaNoise(position: Vector3, level: number, radius: num
 			end
 		end
 	end
+end
+
+-- ─── World Noise (anonymous) ──────────────────────────────────
+-- Creates an anonymous noise event (player = nil) for world events
+-- like lever pulls, boulder landings, item drops.
+-- The monster hears the sound but doesn't know WHO made it —
+-- it will INVESTIGATE the position instead of chasing a player.
+
+function SensorSystem.AddWorldNoise(position: Vector3, level: number)
+	local clamped = math.clamp(level, 0, 1)
+	local expireAt = os.clock() + NOISE_LIFETIME
+
+	-- Replace existing world noise if one is nearby (within 10 studs)
+	for _, event in ipairs(noiseEvents) do
+		if event.player == nil then
+			if (event.position - position).Magnitude < 10 then
+				if clamped > event.level then
+					event.position = position
+					event.level = clamped
+					event.expireAt = expireAt
+				end
+				return
+			end
+		end
+	end
+
+	table.insert(noiseEvents, {
+		player = nil,
+		position = position,
+		level = clamped,
+		expireAt = expireAt,
+	})
 end
 
 local function cleanNoise()

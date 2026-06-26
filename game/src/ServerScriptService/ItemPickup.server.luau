@@ -325,12 +325,15 @@ local function dropItem(player)
 		if data.category == "coal" then
 			SoundManager.coalDrop(dropPos)
 			SensorSystem.AddAreaNoise(dropPos, 0.5, 30)
+			SensorSystem.AddWorldNoise(dropPos, 0.5)
 		elseif data.category == "boulder" then
 			SoundManager.coalThrowHit(dropPos)
 			SensorSystem.AddAreaNoise(dropPos, 0.7, 35)
+			SensorSystem.AddWorldNoise(dropPos, 0.7)
 		else
 			SoundManager.itemDrop(dropPos)
 			SensorSystem.AddAreaNoise(dropPos, 0.35, 25)
+			SensorSystem.AddWorldNoise(dropPos, 0.35)
 		end
 	end
 
@@ -461,6 +464,7 @@ local function throwBoulder(player: Player)
 		-- Landing sound + area noise (boulder hits ground hard)
 		SoundManager.coalThrowHit(boulderPart.Position)
 		SensorSystem.AddAreaNoise(boulderPart.Position, LANDING_NOISE, 40)
+		SensorSystem.AddWorldNoise(boulderPart.Position, LANDING_NOISE)
 		print(string.format("[ItemPickup] Boulder %s mendarat — noise + sound fired", player.Name))
 
 		task.delay(BOULDER_RESET_TIME, function()

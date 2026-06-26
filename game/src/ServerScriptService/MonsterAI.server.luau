@@ -172,7 +172,7 @@ end
 
 -- ── State Machine ─────────────────────────────────────────────
 
-type MonsterState = "IDLE" | "CHASE" | "CATCH"
+type MonsterState = "IDLE" | "INVESTIGATE" | "CHASE" | "CATCH" | "SEARCH"
 
 local state: MonsterState = "IDLE"
 local activeRules: { string } = {}
@@ -181,12 +181,36 @@ local chaseTarget: Player? = nil
 local lostTimer = 0
 local idleTarget: Vector3? = nil
 local spotPlayedFor: Player? = nil
+local investigatePos: Vector3? = nil
+local investigateTimer = 0
+local lastKnownPos: Vector3? = nil
 
 local graceActive = false
 local GRACE_PERIOD = 8 -- seconds the monster waits at start before activating
 
-local LOST_TIME = 5
+local CHASE_LOST_TIME = 4
+local INVESTIGATE_TIMEOUT = 6
+local INVESTIGATE_SPEED_MUL = 0.7
+local DISTRACTION_THRESHOLD = 0.4
+local SMELL_CHASE_DIST = 8 -- within this distance, smell = sure enough to chase
 local IDLE_RANGE = 5 -- tiles
+
+-- ── Suspicion / Certainty System ──────────────────────────────
+-- The monster builds "suspicion" toward specific players through
+-- repeated hearing and smelling. ANY single sense can eventually
+-- convince the monster to chase — it doesn't need Vision.
+--   0.70 suspicion → CHASE ("I'm sure enough — it's a player!")
+-- Suspicion decays when the player isn't being sensed.
+local suspicion: { [Player]: number } = {}
+local SUSPICION_DECAY_RATE = 0.12 -- per second when not sensing player
+local SUSPICION_CHASE_THRESHOLD = 0.7
+
+-- ── Chase Persistence ─────────────────────────────────────────
+local chaseDuration = 0 -- seconds the current chase has lasted
+local postChaseSearchPos: Vector3? = nil -- area to search after losing target
+local searchWanderTimer = 0
+local SEARCH_WANDER_DURATION = 4 -- seconds to search area before giving up
+local lastSensedPlayers: { [Player]: boolean } = {} -- updated each sensor tick, used for decay
 
 -- beginChase ──────────────────────────────────────────────────
 local function beginChase(player: Player)
@@ -204,8 +228,22 @@ local function beginChase(player: Player)
 			end)
 		end
 	end
-	lostTimer = LOST_TIME
+	-- Update last known position
+	if player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			lastKnownPos = hrp.Position
+		end
+	end
+	-- Effective lost time scales with chase duration:
+	-- A monster that's been chasing for 10s is more persistent
+	-- than one that just started (4s base → up to 8s cap).
+	local effectiveLostTime = CHASE_LOST_TIME + math.min(chaseDuration * 0.3, 4)
+
+	lostTimer = effectiveLostTime
+	chaseDuration = 0
 	state = "CHASE"
+	investigatePos = nil
 	sounds:onStateChange("CHASE", true)
 end
 
@@ -213,9 +251,27 @@ end
 local function beginIdle()
 	state = "IDLE"
 	chaseTarget = nil
+	investigatePos = nil
 	idleTarget = nil
+	suspicion = {}
+	chaseDuration = 0
+	postChaseSearchPos = nil
+	searchWanderTimer = 0
 	playMovement("Walk")
 	sounds:onStateChange("IDLE", false)
+end
+
+-- beginInvestigate ────────────────────────────────────────────
+-- Monster heard a sound or smelled something — go check it out.
+-- Suspicion can build up through ANY sense (hearing, smell, vision)
+-- and once it reaches the chase threshold, the monster commits.
+local function beginInvestigate(position: Vector3)
+	investigatePos = position
+	investigateTimer = INVESTIGATE_TIMEOUT
+	chaseTarget = nil
+	state = "INVESTIGATE"
+	playMovement("Walk")
+	sounds:onStateChange("IDLE", false) -- same audio as idle (cautious walk)
 end
 
 -- ── Tentacle Attack Visual ─────────────────────────────────────
@@ -502,25 +558,206 @@ RunService.Heartbeat:Connect(function(dt)
 		local all = Players:GetPlayers()
 
 		if state ~= "CATCH" then
+			-- Run all sensor checks once per tick
 			local heard = SensorSystem.CheckHearing(monPos, activeRules)
-			if heard and heard.player and heard.player.Character then
-				beginChase(heard.player)
-			end
-
 			local smelled = SensorSystem.CheckSmell(monPos, all, activeRules)
-			if smelled then
-				beginChase(smelled)
-			end
-
 			local seen = SensorSystem.CheckVision(monster, monPos, all, activeRules)
+
+			-- ── VISION: always triggers immediate CHASE ────────
 			if seen then
+				local seenChar = seen.Character
+				local seenHRP = seenChar and seenChar:FindFirstChild("HumanoidRootPart")
+				if seenHRP then
+					lastKnownPos = seenHRP.Position
+				end
+				suspicion[seen] = 1.0
 				beginChase(seen)
 			end
 
-			if state == "CHASE" then
-				lostTimer -= SENSOR_INT
-				if lostTimer <= 0 then
+			-- ── Build suspicion from hearing ───────────────────
+			if heard and heard.player then
+				local p = heard.player
+				local gain = heard.level * 0.35 -- louder noise = more suspicion
+				suspicion[p] = math.min((suspicion[p] or 0) + gain, 1.0)
+				lastKnownPos = heard.position
+			end
+
+			-- ── Build suspicion from smell ────────────────────
+			if smelled then
+				local smellChar = smelled.Character
+				local smellHRP = smellChar and smellChar:FindFirstChild("HumanoidRootPart")
+				if smellHRP then
+					local smellDist = (monPos - smellHRP.Position).Magnitude
+					local smellFactor = 1 - (smellDist / Constants.MONSTER_SMELL_RADIUS)
+					suspicion[smelled] = math.min((suspicion[smelled] or 0) + smellFactor * 0.25, 1.0)
+					lastKnownPos = smellHRP.Position
+				end
+			end
+
+			-- ── Track sensed players for suspicion decay ────
+			lastSensedPlayers = {}
+			if seen then
+				lastSensedPlayers[seen] = true
+			end
+			if smelled then
+				lastSensedPlayers[smelled] = true
+			end
+			if heard and heard.player then
+				lastSensedPlayers[heard.player] = true
+			end
+
+			-- ── Check if any player reached chase threshold ───
+			local highestSuspPlayer: Player? = nil
+			local highestSuspLevel = 0
+			for p, level in pairs(suspicion) do
+				if level >= SUSPICION_CHASE_THRESHOLD and level > highestSuspLevel then
+					highestSuspLevel = level
+					highestSuspPlayer = p
+				end
+			end
+
+			-- ── State-specific processing ───────────────────────
+			if state == "IDLE" then
+				-- Suspicion high enough → chase
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+				-- Hearing (with player) → investigate + build suspicion
+				elseif heard and heard.player then
+					beginInvestigate(heard.position)
+				-- World noise (anonymous) → investigate
+				elseif heard then
+					beginInvestigate(heard.position)
+				-- Smell → investigate (or chase if very close)
+				elseif smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smellChar:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (monPos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							beginInvestigate(smellHRP.Position)
+						end
+					end
+				end
+			elseif state == "INVESTIGATE" then
+				-- Suspicion high enough → upgrade to CHASE
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+
+				-- Smell very close → instant chase (too close to ignore)
+				elseif not seen and smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smellChar:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (monPos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							-- Redirect investigation toward smell source
+							investigatePos = smellHRP.Position
+							investigateTimer = INVESTIGATE_TIMEOUT
+						end
+					end
+				end
+
+				-- New louder/closer noise → redirect investigation
+				if not seen and heard and heard.level > 0.3 then
+					if investigatePos then
+						local newDist = (monPos - heard.position).Magnitude
+						local curDist = (monPos - investigatePos).Magnitude
+						if newDist < curDist * 0.7 or heard.level > 0.7 then
+							investigatePos = heard.position
+							investigateTimer = INVESTIGATE_TIMEOUT
+						end
+					else
+						investigatePos = heard.position
+						investigateTimer = INVESTIGATE_TIMEOUT
+					end
+				end
+
+				-- Investigation timeout
+				investigateTimer -= SENSOR_INT
+				if investigateTimer <= 0 then
 					beginIdle()
+				end
+			elseif state == "SEARCH" then
+				-- Suspicion high enough → chase (re-found the player!)
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+				-- New noise while searching → investigate
+				elseif heard then
+					beginInvestigate(heard.position)
+				-- Smell while searching → investigate or chase
+				elseif smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smellChar:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (monPos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							beginInvestigate(smellHRP.Position)
+						end
+					end
+				end
+			elseif state == "CHASE" then
+				-- Effective lost time scales with chase duration
+				local effectiveLostTime = CHASE_LOST_TIME + math.min(chaseDuration * 0.3, 4)
+
+				-- Update lost timer based on what we can sense
+				if seen then
+					lostTimer = effectiveLostTime
+				elseif smelled then
+					-- Smell extends timer proportional to proximity
+					-- Close smell (0 studs) → ~80% reset, edge of range → ~5%
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smellChar:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (monPos - smellHRP.Position).Magnitude
+						local smellProximity = 1 - (smellDist / Constants.MONSTER_SMELL_RADIUS)
+						local smellReset = effectiveLostTime * smellProximity * 0.8
+						lostTimer = math.max(lostTimer, smellReset)
+					end
+				elseif heard and heard.player == chaseTarget then
+					-- Hearing the chase target partially extends timer
+					lostTimer = math.max(lostTimer, effectiveLostTime * 0.4)
+				else
+					lostTimer -= SENSOR_INT
+				end
+
+				-- Distraction: anonymous world noise can break the chase
+				-- BUT harder to distract a monster that's been chasing longer
+				if not seen and heard and heard.player == nil then
+					local dist = (monPos - heard.position).Magnitude
+					local hearRadius = Constants.MONSTER_HEAR_RADIUS
+					if dist <= hearRadius then
+						local distractionScore = heard.level * (1 - dist / hearRadius)
+						-- Chase persistence makes distraction harder
+						local effectiveThreshold = DISTRACTION_THRESHOLD + math.min(chaseDuration * 0.04, 0.35)
+						-- If monster can still smell the target, even harder
+						if smelled then
+							effectiveThreshold *= 1.5
+						end
+						if distractionScore >= effectiveThreshold then
+							-- Remember where the target was so we can return
+							postChaseSearchPos = lastKnownPos
+							beginInvestigate(heard.position)
+						end
+					end
+				end
+
+				-- Lost the target → search the area, not just give up
+				if lostTimer <= 0 then
+					postChaseSearchPos = lastKnownPos
+					if lastKnownPos then
+						beginInvestigate(lastKnownPos)
+					else
+						beginIdle()
+					end
 				end
 			end
 		end
@@ -541,6 +778,24 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
+	-- ── Suspicion decay ──────────────────────────────────────────
+	-- Suspicion fades for players we're not currently sensing
+	if state ~= "CATCH" then
+		for p, level in pairs(suspicion) do
+			if not lastSensedPlayers[p] then
+				suspicion[p] = math.max(0, level - SUSPICION_DECAY_RATE * dt)
+				if suspicion[p] <= 0 then
+					suspicion[p] = nil
+				end
+			end
+		end
+	end
+
+	-- ── Chase duration tracking ──────────────────────────────────
+	if state == "CHASE" then
+		chaseDuration += dt
+	end
+
 	-- IDLE movement
 	if state == "IDLE" then
 		if not idleTarget then
@@ -553,18 +808,80 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
+	-- INVESTIGATE movement
+	if state == "INVESTIGATE" and investigatePos then
+		local speed = Constants.MONSTER_SPEED_BASE * INVESTIGATE_SPEED_MUL
+		if stepToward(investigatePos, speed, dt) then
+			-- Reached the investigation target
+			if postChaseSearchPos then
+				-- We were distracted or lost the target — search the area
+				state = "SEARCH"
+				searchWanderTimer = SEARCH_WANDER_DURATION
+				playMovement("Walk")
+			else
+				-- Nothing found, go idle
+				beginIdle()
+			end
+		end
+		return
+	end
+
+	-- SEARCH movement (post-chase area search)
+	if state == "SEARCH" then
+		searchWanderTimer -= dt
+		if searchWanderTimer <= 0 then
+			-- Searched long enough, give up
+			beginIdle()
+			return
+		end
+		-- Wander near the last known position
+		if not idleTarget then
+			local searchCenter = postChaseSearchPos or monPos
+			local col, row = worldToTile(searchCenter)
+			for _ = 1, 30 do
+				local nc = col + math.random(-3, 3)
+				local nr = row + math.random(-3, 3)
+				if isTileWalkable(nc, nr) then
+					idleTarget = tileToWorld(nc, nr)
+					break
+				end
+			end
+			if not idleTarget then
+				idleTarget = searchCenter
+			end
+		end
+		local speed = Constants.MONSTER_SPEED_BASE * 0.5
+		if stepToward(idleTarget :: Vector3, speed, dt) then
+			idleTarget = nil
+		end
+		return
+	end
+
 	-- CHASE movement
 	if state == "CHASE" and chaseTarget then
 		local char = chaseTarget.Character
 		if not char then
-			beginIdle()
+			postChaseSearchPos = lastKnownPos
+			if lastKnownPos then
+				beginInvestigate(lastKnownPos)
+			else
+				beginIdle()
+			end
 			return
 		end
 		local hrp = char:FindFirstChild("HumanoidRootPart")
 		if not hrp then
-			beginIdle()
+			postChaseSearchPos = lastKnownPos
+			if lastKnownPos then
+				beginInvestigate(lastKnownPos)
+			else
+				beginIdle()
+			end
 			return
 		end
+
+		-- Keep updating last known position while chasing
+		lastKnownPos = hrp.Position
 
 		local speed =
 			math.min(Constants.MONSTER_SPEED_BASE + Constants.MONSTER_SPEED_PER_LEVEL, Constants.MONSTER_SPEED_MAX)
