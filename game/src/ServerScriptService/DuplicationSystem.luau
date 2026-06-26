@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService") -- ✨ ADDED TWEEN SERVICE
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
+local SensorSystem = require(script.Parent.SensorSystem)
 local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
@@ -141,60 +142,394 @@ local function runCloneAI(clone: Model, rules: { string })
 
 	local idleTimer = 0
 	local wanderTarget: Vector3? = nil
-	local lastTarget: Player? = nil
+
+	-- ── Suspicion / Certainty System (matches MonsterAI) ────────
+	local suspicion: { [Player]: number } = {}
+	local SUSPICION_DECAY_RATE = 0.12
+	local SUSPICION_CHASE_THRESHOLD = 0.7
+
+	-- ── Chase Persistence (matches MonsterAI) ───────────────────
+	local chaseTarget: Player? = nil
+	local lostTimer = 0
+	local chaseDuration = 0
+	local lastKnownPos: Vector3? = nil
+	local postChaseSearchPos: Vector3? = nil
+	local searchWanderTimer = 0
+
+	-- ── Constants (matches MonsterAI) ───────────────────────────
+	local CHASE_LOST_TIME = 4
+	local INVESTIGATE_TIMEOUT = 6
+	local INVESTIGATE_SPEED_MUL = 0.7
+	local DISTRACTION_THRESHOLD = 0.4
+	local SMELL_CHASE_DIST = 8
+	local SEARCH_WANDER_DURATION = 4
+	local SENSOR_INT = 0.25
+
+	local investigatePos: Vector3? = nil
+	local investigateTimer = 0
+	local spotPlayedFor: Player? = nil
+	local lastSensedPlayers: { [Player]: boolean } = {}
+
+	-- ── State transition helpers (matches MonsterAI) ────────────
+	local function beginChase(player: Player)
+		if chaseTarget ~= player then
+			chaseTarget = player
+			if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.2) end
+			if runTrack and not runTrack.IsPlaying then runTrack:Play(0.2) end
+			if spotPlayedFor ~= player then
+				spotPlayedFor = player
+				if spottedTrack then
+					task.spawn(function()
+						task.wait(0.05)
+						spottedTrack:Play(0.1)
+					end)
+				end
+			end
+		end
+		if player.Character then
+			local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				lastKnownPos = hrp.Position
+			end
+		end
+		local effectiveLostTime = CHASE_LOST_TIME + math.min(chaseDuration * 0.3, 4)
+		lostTimer = effectiveLostTime
+		chaseDuration = 0
+		currentState = "CHASE"
+		investigatePos = nil
+		cloneSounds:onStateChange("CHASE", true)
+	end
+
+	local function beginIdle()
+		currentState = "IDLE"
+		chaseTarget = nil
+		investigatePos = nil
+		wanderTarget = nil
+		suspicion = {}
+		chaseDuration = 0
+		postChaseSearchPos = nil
+		searchWanderTimer = 0
+		spotPlayedFor = nil
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.2) end
+		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.2) end
+		cloneSounds:onStateChange("IDLE", false)
+	end
+
+	local function beginInvestigate(position: Vector3)
+		investigatePos = position
+		investigateTimer = INVESTIGATE_TIMEOUT
+		chaseTarget = nil
+		currentState = "INVESTIGATE"
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.2) end
+		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.2) end
+		cloneSounds:onStateChange("IDLE", false)
+	end
+
+	local sensorCD = 0
 
 	while clone.Parent ~= nil do
 		local dt = RunService.Heartbeat:Wait()
-
 		local pos = root.Position
 
-		-- Find nearest player within detection range
-		local target: Player? = nil
-		local targetDist = 60 -- detection range
+		sensorCD += dt
 
-		for _, pl in ipairs(Players:GetPlayers()) do
-			local char = pl.Character
-			if not char then
-				continue
-			end
-			local hrp = char:FindFirstChild("HumanoidRootPart")
-			if not hrp then
-				continue
+		-- ── Sensor tick (every SENSOR_INT seconds) ──────────────
+		if sensorCD >= SENSOR_INT and currentState ~= "CATCH" then
+			sensorCD = 0
+			local all = Players:GetPlayers()
+
+			local heard = SensorSystem.CheckHearing(pos, rules)
+			local smelled = SensorSystem.CheckSmell(pos, all, rules)
+			local seen = SensorSystem.CheckVision(clone, pos, all, rules)
+
+			-- Vision: always triggers immediate CHASE
+			if seen then
+				local seenChar = seen.Character
+				local seenHRP = seenChar and seenChar:FindFirstChild("HumanoidRootPart")
+				if seenHRP then
+					lastKnownPos = seenHRP.Position
+				end
+				suspicion[seen] = 1.0
+				beginChase(seen)
 			end
 
-			local d = (pos - hrp.Position).Magnitude
-			if d < targetDist then
-				targetDist = d
-				target = pl
+			-- Build suspicion from hearing
+			if heard and heard.player then
+				local p = heard.player
+				local gain = heard.level * 0.35
+				suspicion[p] = math.min((suspicion[p] or 0) + gain, 1.0)
+				lastKnownPos = heard.position
+			end
+
+			-- Build suspicion from smell
+			if smelled then
+				local smellChar = smelled.Character
+				local smellHRP = smellChar and smelled.Character:FindFirstChild("HumanoidRootPart")
+				if smellHRP then
+					local smellDist = (pos - smellHRP.Position).Magnitude
+					local smellFactor = 1 - (smellDist / Constants.MONSTER_SMELL_RADIUS)
+					suspicion[smelled] = math.min((suspicion[smelled] or 0) + smellFactor * 0.25, 1.0)
+					lastKnownPos = smellHRP.Position
+				end
+			end
+
+			-- Track sensed players for suspicion decay
+			lastSensedPlayers = {}
+			if seen then lastSensedPlayers[seen] = true end
+			if smelled then lastSensedPlayers[smelled] = true end
+			if heard and heard.player then lastSensedPlayers[heard.player] = true end
+
+			-- Check if any player reached chase threshold
+			local highestSuspPlayer: Player? = nil
+			local highestSuspLevel = 0
+			for p, level in pairs(suspicion) do
+				if level >= SUSPICION_CHASE_THRESHOLD and level > highestSuspLevel then
+					highestSuspLevel = level
+					highestSuspPlayer = p
+				end
+			end
+
+			-- ── State-specific sensor processing ─────────────────
+			if currentState == "IDLE" then
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+				elseif heard and heard.player then
+					beginInvestigate(heard.position)
+				elseif heard then
+					beginInvestigate(heard.position)
+				elseif smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smelled.Character:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (pos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							beginInvestigate(smellHRP.Position)
+						end
+					end
+				end
+			elseif currentState == "INVESTIGATE" then
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+				elseif not seen and smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smelled.Character:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (pos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							investigatePos = smellHRP.Position
+							investigateTimer = INVESTIGATE_TIMEOUT
+						end
+					end
+				end
+
+				if not seen and heard and heard.level > 0.3 then
+					if investigatePos then
+						local newDist = (pos - heard.position).Magnitude
+						local curDist = (pos - investigatePos).Magnitude
+						if newDist < curDist * 0.7 or heard.level > 0.7 then
+							investigatePos = heard.position
+							investigateTimer = INVESTIGATE_TIMEOUT
+						end
+					else
+						investigatePos = heard.position
+						investigateTimer = INVESTIGATE_TIMEOUT
+					end
+				end
+
+				investigateTimer -= SENSOR_INT
+				if investigateTimer <= 0 then
+					beginIdle()
+				end
+			elseif currentState == "SEARCH" then
+				if highestSuspPlayer then
+					beginChase(highestSuspPlayer)
+				elseif heard then
+					beginInvestigate(heard.position)
+				elseif smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smelled.Character:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (pos - smellHRP.Position).Magnitude
+						if smellDist <= SMELL_CHASE_DIST then
+							lastKnownPos = smellHRP.Position
+							beginChase(smelled)
+						else
+							beginInvestigate(smellHRP.Position)
+						end
+					end
+				end
+			elseif currentState == "CHASE" then
+				local effectiveLostTime = CHASE_LOST_TIME + math.min(chaseDuration * 0.3, 4)
+
+				if seen then
+					lostTimer = effectiveLostTime
+				elseif smelled then
+					local smellChar = smelled.Character
+					local smellHRP = smellChar and smelled.Character:FindFirstChild("HumanoidRootPart")
+					if smellHRP then
+						local smellDist = (pos - smellHRP.Position).Magnitude
+						local smellProximity = 1 - (smellDist / Constants.MONSTER_SMELL_RADIUS)
+						local smellReset = effectiveLostTime * smellProximity * 0.8
+						lostTimer = math.max(lostTimer, smellReset)
+					end
+				elseif heard and heard.player == chaseTarget then
+					lostTimer = math.max(lostTimer, effectiveLostTime * 0.4)
+				else
+					lostTimer -= SENSOR_INT
+				end
+
+				-- Distraction: anonymous world noise can break the chase
+				if not seen and heard and heard.player == nil then
+					local dist = (pos - heard.position).Magnitude
+					local hearRadius = Constants.MONSTER_HEAR_RADIUS
+					if dist <= hearRadius then
+						local distractionScore = heard.level * (1 - dist / hearRadius)
+						local effectiveThreshold = DISTRACTION_THRESHOLD + math.min(chaseDuration * 0.04, 0.35)
+						if smelled then
+							effectiveThreshold *= 1.5
+						end
+						if distractionScore >= effectiveThreshold then
+							postChaseSearchPos = lastKnownPos
+							beginInvestigate(heard.position)
+						end
+					end
+				end
+
+				if lostTimer <= 0 then
+					postChaseSearchPos = lastKnownPos
+					if lastKnownPos then
+						beginInvestigate(lastKnownPos)
+					else
+						beginIdle()
+					end
+				end
 			end
 		end
 
-		if target then
-			if currentState ~= "CHASE" then
-				currentState = "CHASE"
-				cloneSounds:onStateChange("CHASE", true)
-			end
-			if target ~= lastTarget then
-				lastTarget = target
-				if spottedTrack then
-					spottedTrack:Play(0.1)
+		-- ── Suspicion decay ──────────────────────────────────────
+		if currentState ~= "CATCH" then
+			for p, level in pairs(suspicion) do
+				if not lastSensedPlayers[p] then
+					suspicion[p] = math.max(0, level - SUSPICION_DECAY_RATE * dt)
+					if suspicion[p] <= 0 then
+						suspicion[p] = nil
+					end
 				end
 			end
-			if walkTrack and walkTrack.IsPlaying then
-				walkTrack:Stop(0.2)
-			end
-			if runTrack and not runTrack.IsPlaying then
-				runTrack:Play(0.2)
-			end
+		end
 
-			local char = target.Character
+		-- ── Chase duration tracking ─────────────────────────────
+		if currentState == "CHASE" then
+			chaseDuration += dt
+		end
+
+		-- ── Movement by state ────────────────────────────────────
+		if currentState == "IDLE" then
+			idleTimer += 0.05
+			if idleTimer >= 3 or not wanderTarget then
+				idleTimer = 0
+				local spread = 24
+				wanderTarget = Vector3.new(pos.X + math.random(-spread, spread), CLONE_Y, pos.Z + math.random(-spread, spread))
+			end
+			if wanderTarget then
+				local dir = wanderTarget - pos
+				local flatDir = Vector3.new(dir.X, 0, dir.Z)
+				local dist = flatDir.Magnitude
+				if dist > 1 then
+					local step = math.min(5 * dt, dist)
+					local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
+					if dist > 0.001 then
+						clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
+					else
+						clone:PivotTo(CFrame.new(newPos))
+					end
+				else
+					wanderTarget = nil
+				end
+			end
+		elseif currentState == "INVESTIGATE" and investigatePos then
+			local dir = investigatePos - pos
+			local flatDir = Vector3.new(dir.X, 0, dir.Z)
+			local dist = flatDir.Magnitude
+			if dist > 1 then
+				local speed = CLONE_SPEED * INVESTIGATE_SPEED_MUL
+				local step = math.min(speed * dt, dist)
+				local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
+				if dist > 0.001 then
+					clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
+				else
+					clone:PivotTo(CFrame.new(newPos))
+				end
+			else
+				-- Reached investigation target
+				if postChaseSearchPos then
+					currentState = "SEARCH"
+					searchWanderTimer = SEARCH_WANDER_DURATION
+				else
+					beginIdle()
+				end
+			end
+		elseif currentState == "SEARCH" then
+			searchWanderTimer -= dt
+			if searchWanderTimer <= 0 then
+				beginIdle()
+			else
+				if not wanderTarget then
+					local searchCenter = postChaseSearchPos or pos
+					local spread = 12
+					wanderTarget = Vector3.new(
+						searchCenter.X + math.random(-spread, spread),
+						CLONE_Y,
+						searchCenter.Z + math.random(-spread, spread)
+					)
+				end
+				if wanderTarget then
+					local dir = wanderTarget - pos
+					local flatDir = Vector3.new(dir.X, 0, dir.Z)
+					local dist = flatDir.Magnitude
+					if dist > 1 then
+						local speed = CLONE_SPEED * 0.5
+						local step = math.min(speed * dt, dist)
+						local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
+						if dist > 0.001 then
+							clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
+						else
+							clone:PivotTo(CFrame.new(newPos))
+						end
+					else
+						wanderTarget = nil
+					end
+				end
+			end
+		elseif currentState == "CHASE" and chaseTarget then
+			local char = chaseTarget.Character
 			if not char then
+				postChaseSearchPos = lastKnownPos
+				if lastKnownPos then
+					beginInvestigate(lastKnownPos)
+				else
+					beginIdle()
+				end
 				continue
 			end
 			local hrp = char:FindFirstChild("HumanoidRootPart")
 			if not hrp then
+				postChaseSearchPos = lastKnownPos
+				if lastKnownPos then
+					beginInvestigate(lastKnownPos)
+				else
+					beginIdle()
+				end
 				continue
 			end
+
+			lastKnownPos = hrp.Position
 
 			-- Catch radius
 			local catchR = Constants.MONSTER_REACH_BASE
@@ -202,7 +537,6 @@ local function runCloneAI(clone: Model, rules: { string })
 				catchR += Constants.MONSTER_REACH_BONUS
 			end
 
-			-- ✨ THE NEW SKILL-BASED CLONE CATCH SEQUENCE ✨
 			-- ── Flat XZ distance (consistent with primary MonsterAI) ─────
 			local flatCPos = Vector3.new(pos.X, 0, pos.Z)
 			local flatPPos = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
@@ -237,11 +571,11 @@ local function runCloneAI(clone: Model, rules: { string })
 				shootBlackTentacles(clone, root, snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
 				task.wait(STRIKE_TIME)
 
-				if not target or not target.Character then
+				if not chaseTarget or not chaseTarget.Character then
 					currentState = "IDLE"
 					continue
 				end
-				local liveHRP = target.Character:FindFirstChild("HumanoidRootPart")
+				local liveHRP = chaseTarget.Character:FindFirstChild("HumanoidRootPart")
 				if liveHRP then
 					local IMPACT_HITBOX = 4
 					if (liveHRP.Position - snapPos).Magnitude <= IMPACT_HITBOX then
@@ -250,7 +584,7 @@ local function runCloneAI(clone: Model, rules: { string })
 						if hum2 and hum2.Health > 0 then
 							hum2.Health = 0
 							if RE_PlayerDied then
-								RE_PlayerDied:FireAllClients(target.Name)
+								RE_PlayerDied:FireAllClients(chaseTarget.Name)
 							end
 						end
 						task.wait(2)
@@ -275,45 +609,6 @@ local function runCloneAI(clone: Model, rules: { string })
 					clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
 				else
 					clone:PivotTo(CFrame.new(newPos))
-				end
-			end
-		else
-			if currentState ~= "IDLE" then
-				currentState = "IDLE"
-				cloneSounds:onStateChange("IDLE", false)
-			end
-			lastTarget = nil
-			if runTrack and runTrack.IsPlaying then
-				runTrack:Stop(0.2)
-			end
-			if walkTrack and not walkTrack.IsPlaying then
-				walkTrack:Play(0.2)
-			end
-
-			-- Idle wander
-			idleTimer += 0.05
-			if idleTimer >= 3 or not wanderTarget then
-				idleTimer = 0
-				local spread = 24
-				wanderTarget =
-					Vector3.new(pos.X + math.random(-spread, spread), CLONE_Y, pos.Z + math.random(-spread, spread))
-			end
-			if wanderTarget then
-				local dir = wanderTarget - pos
-				local flatDir = Vector3.new(dir.X, 0, dir.Z)
-				local dist = flatDir.Magnitude
-
-				if dist > 1 then
-					local step = math.min(5 * dt, dist)
-					local newPos = Vector3.new(pos.X + flatDir.Unit.X * step, CLONE_Y, pos.Z + flatDir.Unit.Z * step)
-
-					if dist > 0.001 then
-						clone:PivotTo(CFrame.lookAt(newPos, newPos + flatDir.Unit))
-					else
-						clone:PivotTo(CFrame.new(newPos))
-					end
-				else
-					wanderTarget = nil
 				end
 			end
 		end
