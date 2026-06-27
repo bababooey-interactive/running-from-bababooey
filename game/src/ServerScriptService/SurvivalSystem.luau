@@ -21,6 +21,7 @@ local SoundManager = require(script.Parent.SoundManager)
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE_HungerUpdate = Remotes:WaitForChild("HungerUpdate")
 local RE_DarkUpdate = Remotes:WaitForChild("DarkUpdate")
+local RE_PlayClientSound = Remotes:WaitForChild("PlayClientSound")
 local RE_PlayerDied = Remotes:WaitForChild("PlayerDied")
 local RE_EatFood = Remotes:WaitForChild("EatFood")
 
@@ -160,16 +161,13 @@ local function survivalTick(dt: number)
 			RE_HungerUpdate:FireClient(player, state.hunger)
 
 			-- Warning sounds at 30 % and 10 % thresholds
-			local pos = getCharacterPos(character)
-			if pos then
-				if state.hunger <= 30 and not state.hungerAt30 then
-					state.hungerAt30 = true
-					SoundManager.hungerWarning(pos)
-				end
-				if state.hunger <= 10 and not state.hungerAt10 then
-					state.hungerAt10 = true
-					SoundManager.hungerWarning(pos)
-				end
+			if state.hunger <= 30 and not state.hungerAt30 then
+				state.hungerAt30 = true
+				RE_PlayClientSound:FireClient(player, SoundManager.Ids.HungerWarning, 0.7)
+			end
+			if state.hunger <= 10 and not state.hungerAt10 then
+				state.hungerAt10 = true
+				RE_PlayClientSound:FireClient(player, SoundManager.Ids.HungerWarning, 0.7)
 			end
 
 			if state.hunger <= 0 then
@@ -181,13 +179,10 @@ local function survivalTick(dt: number)
 		-- ── DARKNESS TIMER ──────────────────────────────────────
 		if activeRules[Constants.Rules.PLAYER_DARK_TIMER] then
 			local inDark = isInDark(character)
-			local pos = getCharacterPos(character)
 
 			-- Detect dark zone entry (first tick the player is inside)
 			if inDark and not state.prevInDark then
-				if pos then
-					SoundManager.darkEnter(pos)
-				end
+				RE_PlayClientSound:FireClient(player, SoundManager.Ids.DarkEnter, 0.7)
 				-- Reset per-visit warning flags so they fire again next visit
 				state.darkAt10 = false
 				state.darkAt5 = false
@@ -206,15 +201,13 @@ local function survivalTick(dt: number)
 				state.darkTimer = math.max(0, state.darkTimer - dt)
 
 				-- Warning sounds at 10 s and 5 s remaining
-				if pos then
-					if state.darkTimer <= 10 and not state.darkAt10 then
-						state.darkAt10 = true
-						SoundManager.darkWarning(pos)
-					end
-					if state.darkTimer <= 5 and not state.darkAt5 then
-						state.darkAt5 = true
-						SoundManager.darkWarning(pos)
-					end
+				if state.darkTimer <= 10 and not state.darkAt10 then
+					state.darkAt10 = true
+					RE_PlayClientSound:FireClient(player, SoundManager.Ids.DarkWarning, 0.9)
+				end
+				if state.darkTimer <= 5 and not state.darkAt5 then
+					state.darkAt5 = true
+					RE_PlayClientSound:FireClient(player, SoundManager.Ids.DarkWarning, 0.9)
 				end
 			else
 				-- Fully restore timer when back in light

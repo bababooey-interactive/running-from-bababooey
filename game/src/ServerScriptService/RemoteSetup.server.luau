@@ -34,9 +34,10 @@ ensureRemote("SyncState") -- server→client: late-join sync
 -- Survival system
 ensureRemote("HungerUpdate") -- server→client: hunger value
 ensureRemote("DarkUpdate") -- server→client: dark timer + inDark
+ensureRemote("PlayClientSound") -- server→client: play a sound locally on the client
 ensureRemote("PlayerDied") -- server→all: (name, cause)
 ensureRemote("EatFood") -- client→server: food pickup
-ensureRemote("ThrowBoulder")  -- client→server: lempar boulder yang dipegang
+ensureRemote("ThrowBoulder") -- client→server: lempar boulder yang dipegang
 
 -- Monster / Sensor system
 ensureRemote("MonsterPosition") -- server→all: monster pos + state
@@ -62,11 +63,11 @@ ensureRemote("HeldItemChanged")
 ensureRemote("CoalDeposited")
 ensureRemote("HungerChanged")
 -- ── Coal interaction ─────────────────────────
-ensureRemote("PickupCoal")      -- client→server: player ambil coal (taskId)
-ensureRemote("CoalPickedUp")    -- server→client: konfirmasi pickup berhasil (taskId)
+ensureRemote("PickupCoal") -- client→server: player ambil coal (taskId)
+ensureRemote("CoalPickedUp") -- server→client: konfirmasi pickup berhasil (taskId)
 
 -- ── Lever interaction ────────────────────────
-ensureRemote("PullLever")       -- client→server: player pull lever (taskId)
-ensureRemote("LeverPulled")     -- server→all: broadcast animasi lever (taskId)
+ensureRemote("PullLever") -- client→server: player pull lever (taskId)
+ensureRemote("LeverPulled") -- server→all: broadcast animasi lever (taskId)
 
 print("[RemoteSetup] Semua RemoteEvent sudah siap di ReplicatedStorage.Remotes")

@@ -47,16 +47,16 @@ SoundManager.Ids = {
 
 	-- ── Food & Drink ─────────────────────────────────────────
 	-- Carrot or meat hits the floor; search: "food drop thud soft"
-	FoodDrop = "rbxassetid://0",
+	FoodDrop = "rbxassetid://9120898894",
 
 	-- Waterbottle hits the floor; search: "plastic bottle drop"
-	WaterDrop = "rbxassetid://0",
+	WaterDrop = "rbxassetid://9117558678",
 
 	-- Player eats food (carrot / meat); search: "eating crunch bite"
-	EatFood = "rbxassetid://0",
+	EatFood = "rbxassetid://134938643932555",
 
 	-- Player drinks water; search: "gulp drink water"
-	DrinkWater = "rbxassetid://0",
+	DrinkWater = "rbxassetid://134938643932555",
 
 	-- ── Lever ────────────────────────────────────────────────
 	-- Intentionally loud — generates a large noise event for the monster
@@ -68,13 +68,13 @@ SoundManager.Ids = {
 
 	-- ── Survival feedback ────────────────────────────────────
 	-- Player steps into a dark zone; search: "horror whoosh dark ambient"
-	DarkEnter = "rbxassetid://0",
+	DarkEnter = "rbxassetid://9120697982",
 
 	-- Dark timer reaching critical; search: "horror sting short"
-	DarkWarning = "rbxassetid://0",
+	DarkWarning = "rbxassetid://1014740409",
 
 	-- Hunger dropping critically low; search: "stomach growl grumble"
-	HungerWarning = "rbxassetid://0",
+	HungerWarning = "rbxassetid://90681938651301",
 }
 
 -- ─────────────────────────────────────────────────────────────
