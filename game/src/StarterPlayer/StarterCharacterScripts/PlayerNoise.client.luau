@@ -55,7 +55,9 @@ local sfx = {
 local currentAwareness = 0
 local AwarenessUpdated = Remotes:WaitForChild("AwarenessUpdated")
 AwarenessUpdated.OnClientEvent:Connect(function(awareness: number)
-	currentAwareness = awareness
+	if awareness ~= nil then
+		currentAwareness = awareness
+	end
 end)
 
 RunService.Heartbeat:Connect(function()

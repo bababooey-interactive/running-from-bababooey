@@ -31,6 +31,10 @@ end)
 
 -- ─── Noise Store ──────────────────────────────────────────────
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_AwarenessUpdated = Remotes:WaitForChild("AwarenessUpdated")
+
 type NoiseEvent = {
 	player: Player?, -- nil for anonymous/world noise (lever, boulder, etc.)
 	position: Vector3,
@@ -44,24 +48,34 @@ local NOISE_LIFETIME = 1.2
 function SensorSystem.AddNoise(player: Player, position: Vector3, level: number)
 	local clamped = math.clamp(level, 0, 1)
 	local expireAt = os.clock() + NOISE_LIFETIME
+	local finalLevel = clamped
 
 	-- Replace existing event for this player if one exists
+	local found = false
 	for _, event in ipairs(noiseEvents) do
 		if event.player == player then
 			event.position = position
 			event.level = math.max(event.level, clamped) -- keep loudest
 			event.expireAt = expireAt
-			return
+			finalLevel = event.level
+			found = true
+			break
 		end
 	end
 
-	-- No existing event, insert fresh
-	table.insert(noiseEvents, {
-		player = player,
-		position = position,
-		level = clamped,
-		expireAt = expireAt,
-	})
+	if not found then
+		-- No existing event, insert fresh
+		table.insert(noiseEvents, {
+			player = player,
+			position = position,
+			level = clamped,
+			expireAt = expireAt,
+		})
+	end
+
+	if player then
+		RE_AwarenessUpdated:FireClient(player, nil, finalLevel)
+	end
 end
 
 -- ─── Area Noise ──────────────────────────────────────────────

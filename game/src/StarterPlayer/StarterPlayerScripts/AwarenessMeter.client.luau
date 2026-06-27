@@ -14,11 +14,11 @@ local RE_Noise = Remotes:WaitForChild("AwarenessUpdated")
 
 -- ── Color palette (matches SurvivalUI) ────────────────────────
 local C = {
-	BG_DARK    = Color3.fromRGB(14, 14, 18),
-	BAR_BG     = Color3.fromRGB(35, 35, 42),
-	BORDER     = Color3.fromRGB(60, 60, 75),
-	TEXT_WHITE  = Color3.fromRGB(235, 235, 235),
-	TEXT_DIM    = Color3.fromRGB(150, 150, 160),
+	BG_DARK = Color3.fromRGB(14, 14, 18),
+	BAR_BG = Color3.fromRGB(35, 35, 42),
+	BORDER = Color3.fromRGB(60, 60, 75),
+	TEXT_WHITE = Color3.fromRGB(235, 235, 235),
+	TEXT_DIM = Color3.fromRGB(150, 150, 160),
 }
 
 -- ── Build ScreenGui ───────────────────────────────────────────
@@ -135,20 +135,22 @@ local function setBar(fill, t)
 	):Play()
 end
 
--- ── Noise: from AwarenessUpdated (2nd arg is noise 0-1) ───────
+-- ── Noise: local tracking and replication ─────────────────────
 local currentNoise = 0
 local currentLight = 0
+local NOISE_LIFETIME = 1.2
+local DECAY_RATE = 1 / NOISE_LIFETIME
 
 RE_Noise.OnClientEvent:Connect(function(_aw, noise)
-	-- _aw is monster awareness — ignored entirely
-	currentNoise = noise or 0
-	noiseFill.BackgroundColor3 = noiseColor(currentNoise)
-	setBar(noiseFill, currentNoise)
-	noiseText.Text = currentNoise > 0.02 and string.format("%d%%", math.floor(currentNoise * 100)) or ""
+	-- If _aw is nil, this is a direct noise update from SensorSystem (e.g. lever pull, item drop).
+	-- If _aw is not nil, it's a monster AI awareness update, which we ignore for the noise bar.
+	if _aw == nil and noise then
+		currentNoise = math.max(currentNoise, noise)
+	end
 end)
 
--- ── Light: checked locally every frame ────────────────────────
-RunService.Heartbeat:Connect(function()
+-- ── Light & Noise: checked locally every frame ────────────────
+RunService.Heartbeat:Connect(function(dt)
 	local char = player.Character
 	if not char then
 		return
@@ -158,6 +160,7 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
+	-- 1. Light detection
 	local pos = hrp.Position
 	local maxContrib = 0
 
@@ -181,6 +184,22 @@ RunService.Heartbeat:Connect(function()
 	lightFill.BackgroundColor3 = lightColor(maxContrib)
 	setBar(lightFill, maxContrib)
 	lightText.Text = maxContrib > 0.02 and string.format("%d%%", math.floor(maxContrib * 100)) or ""
+
+	-- 2. Noise local walking detection & decay
+	local vel = hrp.AssemblyLinearVelocity
+	local speed = Vector2.new(vel.X, vel.Z).Magnitude
+
+	if speed >= 1 then -- WALK_SPEED is 1
+		currentNoise = math.max(currentNoise, 0.3) -- WALK_NOISE is 0.3
+	end
+
+	if currentNoise > 0 then
+		currentNoise = math.max(0, currentNoise - DECAY_RATE * dt)
+	end
+
+	noiseFill.BackgroundColor3 = noiseColor(currentNoise)
+	setBar(noiseFill, currentNoise)
+	noiseText.Text = currentNoise > 0.02 and string.format("%d%%", math.floor(currentNoise * 100)) or ""
 end)
 
 -- ── Hide when both bars are at 0 (keeps HUD clean) ────────────
