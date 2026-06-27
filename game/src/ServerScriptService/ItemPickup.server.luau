@@ -1,28 +1,6 @@
 -- =============================================================
 --  ItemPickup.server.luau
 --  ServerScriptService
---
---  Mengelola sistem "pickup & carry" untuk:
---    - FoodItems (carrot, meat, waterbottle) → dipegang → dimakan
---    - Coal (TaskObject) → dipegang → di-drop di fireplace
---
---  ARSITEKTUR:
---    Server: physics (weld/unweld), state per-player, damage/hunger logic
---    Client (ItemInteract.client.luau): UI prompt "Eat"/"Drop Coal"
---
---  REMOTE EVENTS (semua di ReplicatedStorage/Remotes):
---    PickupItem       C→S  player minta pickup item (arg: Model)
---    DropItem         C→S  player minta drop item yang dipegang
---    EatFood          C→S  player minta makan food yang dipegang
---    DepositCoal      C→S  player minta deposit coal ke fireplace
---    HeldItemChanged  S→C  broadcast item yang sedang dipegang player
---                          (arg: player, itemModel | nil, itemCategory)
---
---  NOTES:
---    - Satu player hanya bisa pegang SATU item sekaligus.
---    - Coal yang sudah di-deposit dihapus dari dunia + TaskSystem dikasih tahu.
---    - EatFood restore hunger lewat RemoteEvent "HungerChanged" yang
---      sudah dipakai SurvivalSystem.
 -- =============================================================
 
 local Players = game:GetService("Players")
@@ -40,10 +18,6 @@ local RE_HungerChanged = Remotes:WaitForChild("HungerChanged")
 local RE_ThrowBoulder = Remotes:WaitForChild("ThrowBoulder")
 
 local SoundManager = require(script.Parent.SoundManager)
-
--- ── FIX: require TaskSystem (ModuleScript) untuk coal deposit ──
--- TaskSystem.luau adalah ModuleScript di ServerScriptService,
--- bukan server script. Bisa di-require dari script manapun di server.
 local TaskSystem = require(script.Parent.TaskSystem)
 local SensorSystem = require(script.Parent.SensorSystem)
 
@@ -64,8 +38,6 @@ local THROWABLE_BOULDER_NAMES = {
 	boulder_medium = true,
 }
 local CARRY_WELD_OFFSET = CFrame.new(0, -0.15, -1.2) * CFrame.Angles(math.rad(-20), 0, 0)
-local MIN_FALL_DISTANCE = 1    -- studs; tiny gate so sound plays on real collision, not at drop moment
-local MIN_IMPACT_VELOCITY = 10 -- studs/s; filters out barely-moving contacts
 
 -- ── State ──────────────────────────────────────────────────────
 local heldItems = {}
@@ -95,7 +67,6 @@ local function findFireplace()
 			end
 		end
 	end
-	-- Search deeper in Workspace (e.g. MapPieces.Props)
 	for _, desc in ipairs(Workspace:GetDescendants()) do
 		if desc:IsA("Model") and desc.Name:lower():find("fireplace") then
 			return desc
@@ -113,7 +84,6 @@ local function getFireplacePosition()
 	if part then
 		return part.Position
 	end
-	-- Fallback: pakai pivot position (works even tanpa PrimaryPart)
 	return fp:GetPivot().Position
 end
 
@@ -127,6 +97,11 @@ local function isNearFireplace(character)
 		return false
 	end
 	return (root.Position - fpPos).Magnitude <= FIREPLACE_DEPOSIT_RADIUS
+end
+
+-- Returns true if the model name looks like a waterbottle
+local function isWaterItem(modelName: string): boolean
+	return modelName:lower():find("water") ~= nil
 end
 
 local function weldItemToHand(character, itemModel)
@@ -214,7 +189,7 @@ local function restoreHunger(player, foodName)
 		stats.Value = math.min(100, stats.Value + restore)
 	end
 	RE_HungerChanged:FireClient(player, restore)
-	print(string.format("[ItemPickup] %s makan %s (+%d hunger)", player.Name, foodName, restore))
+	print(string.format("[ItemPickup] %s ate %s (+%d hunger)", player.Name, foodName, restore))
 end
 
 -- ── Core: Pickup ───────────────────────────────────────────────
@@ -283,11 +258,11 @@ local function pickupItem(player, itemModel)
 
 	local char = player.Character
 	if char and char.PrimaryPart then
-		SoundManager.playAt(SoundManager.Ids.ItemPickup, char.PrimaryPart.Position, 0.8, 30)
-		-- Noise event so monster can hear the pickup
+		SoundManager.itemPickup(char.PrimaryPart.Position)
 		SensorSystem.AddNoise(player, char.PrimaryPart.Position, 0.5)
 	end
-	print(string.format("[ItemPickup] %s pickup %s (%s)", player.Name, itemModel.Name, category))
+
+	print(string.format("[ItemPickup] %s picked up %s (%s)", player.Name, itemModel.Name, category))
 	return true
 end
 
@@ -316,87 +291,43 @@ local function dropItem(player)
 			local foodFolder = Workspace:FindFirstChild("FoodItems")
 			data.model.Parent = foodFolder or Workspace
 		end
+
 		for _, pp in ipairs(data.model:GetDescendants()) do
 			if pp:IsA("ProximityPrompt") then
 				pp.Enabled = true
 			end
 		end
 
-		-- Unanchor so the item falls naturally under gravity
-		for _, desc in ipairs(data.model:GetDescendants()) do
-			if desc:IsA("BasePart") then
-				desc.Anchored = false
-				desc.CanCollide = true
+		local dropPos = data.model:GetPivot().Position
+		local itemName = data.model.Name
+
+		if data.category == "coal" then
+			SoundManager.coalDrop(dropPos)
+			SensorSystem.AddAreaNoise(dropPos, 0.5, 30)
+			SensorSystem.AddWorldNoise(dropPos, 0.5)
+		elseif data.category == "boulder" then
+			-- Boulder dropped (not thrown) — still makes a loud thud
+			SoundManager.boulderHit(dropPos)
+			SensorSystem.AddAreaNoise(dropPos, 0.7, 35)
+			SensorSystem.AddWorldNoise(dropPos, 0.7)
+		else
+			-- Food items: waterbottle gets its own sound
+			if isWaterItem(itemName) then
+				SoundManager.waterDrop(dropPos)
+			else
+				SoundManager.foodDrop(dropPos)
 			end
-		end
-		local primary = getPrimaryOrFirstPart(data.model)
-		if primary then
-			primary.Anchored = false
-			primary.CanCollide = true
-		end
-
-		-- Sound & noise fire ON LANDING (Touched), not instantly
-		local droppedModel = data.model
-		local droppedCat = data.category
-		local droppedName = droppedModel and droppedModel.Name or ""
-		local droppedPart = droppedModel and getPrimaryOrFirstPart(droppedModel)
-
-		if droppedPart then
-			local dropPos = droppedPart.Position
-			local touchConn
-			touchConn = droppedPart.Touched:Connect(function(hit)
-				-- Ignore the player character that just dropped it
-				if player.Character and hit:IsDescendantOf(player.Character) then
-					return
-				end
-				-- Only play sound for meaningful impacts:
-				--   traveled >= MIN_FALL_DISTANCE from drop point, OR hit with >= MIN_IMPACT_VELOCITY
-				local travelDist = (dropPos - droppedPart.Position).Magnitude
-				local impactVel = droppedPart.AssemblyLinearVelocity.Magnitude
-				if travelDist < MIN_FALL_DISTANCE and impactVel < MIN_IMPACT_VELOCITY then
-					return
-				end
-
-				touchConn:Disconnect()
-
-				local landPos = droppedPart.Position
-
-				if droppedCat == "coal" then
-					SoundManager.coalLand(landPos)
-					SensorSystem.AddAreaNoise(landPos, 0.5, 30)
-					SensorSystem.AddWorldNoise(landPos, 0.5)
-				elseif droppedCat == "boulder" then
-					SoundManager.boulderLand(landPos)
-					SensorSystem.AddAreaNoise(landPos, 0.7, 35)
-					SensorSystem.AddWorldNoise(landPos, 0.7)
-				elseif droppedCat == "food" then
-					SoundManager.foodDrop(landPos, droppedName)
-					SensorSystem.AddAreaNoise(landPos, 0.3, 22)
-					SensorSystem.AddWorldNoise(landPos, 0.3)
-				else
-					SoundManager.itemDrop(landPos)
-					SensorSystem.AddAreaNoise(landPos, 0.3, 22)
-					SensorSystem.AddWorldNoise(landPos, 0.3)
-				end
-			end)
-
-			-- Safety: if physics never fires a valid Touched (e.g. item lands on a non-collidable),
-			-- clean up the connection after 4s
-			task.delay(4, function()
-				if touchConn then
-					touchConn:Disconnect()
-					touchConn = nil
-				end
-			end)
+			SensorSystem.AddAreaNoise(dropPos, 0.35, 25)
+			SensorSystem.AddWorldNoise(dropPos, 0.35)
 		end
 	end
 
 	heldItems[player] = nil
 	RE_HeldItemChanged:FireAllClients(player, nil, nil)
-	print(string.format("[ItemPickup] %s drop %s", player.Name, data.model and data.model.Name or "?"))
+	print(string.format("[ItemPickup] %s dropped %s", player.Name, data.model and data.model.Name or "?"))
 end
 
--- ── Core: Eat ──────────────────────────────────────────────────
+-- ── Core: Eat / Drink ──────────────────────────────────────────
 
 local function eatFood(player)
 	local data = heldItems[player]
@@ -405,6 +336,12 @@ local function eatFood(player)
 	end
 
 	local foodName = data.model and data.model.Name or "unknown"
+
+	-- Position for sound — grab before destroying the model
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local pos = root and root.Position or Vector3.zero
+
 	unweldItem(data)
 	if data.model and data.model.Parent then
 		data.model:Destroy()
@@ -412,6 +349,14 @@ local function eatFood(player)
 
 	heldItems[player] = nil
 	RE_HeldItemChanged:FireAllClients(player, nil, nil)
+
+	-- Play eat or drink sound based on item type
+	if isWaterItem(foodName) then
+		SoundManager.drinkWater(pos)
+	else
+		SoundManager.eatFood(pos)
+	end
+
 	restoreHunger(player, foodName)
 end
 
@@ -423,16 +368,14 @@ local function depositCoal(player)
 		return
 	end
 
-	-- Server verify: player harus dekat fireplace
 	if not player.Character or not isNearFireplace(player.Character) then
-		warn(string.format("[ItemPickup] %s coba deposit coal tapi jauh dari fireplace", player.Name))
+		warn(string.format("[ItemPickup] %s tried to deposit coal but is too far from fireplace", player.Name))
 		return
 	end
 
 	local coalModel = data.model
 	local coalTaskId = coalModel and coalModel:GetAttribute("TaskId") or nil
 
-	-- Destroy coal sebelum unweld (cegah physics glitch)
 	unweldItem(data)
 	if coalModel and coalModel.Parent then
 		coalModel:Destroy()
@@ -441,26 +384,20 @@ local function depositCoal(player)
 	heldItems[player] = nil
 	RE_HeldItemChanged:FireAllClients(player, nil, nil)
 
-	-- ── FIX: panggil TaskSystem.completeTask langsung ──────────
-	-- RE_CoalDeposited:FireServer() TIDAK VALID dari server script.
-	-- TaskSystem adalah ModuleScript → require dan panggil langsung.
 	if coalTaskId then
 		TaskSystem.completeTask("coal", coalTaskId, player)
 	else
-		-- Fallback: TaskId tidak ada di model coal (setup error di MapGenerator)
-		-- Generate id unik agar completedTasks tidak block deposit berikutnya
-		warn("[ItemPickup] Coal tidak punya TaskId — pakai fallback id")
+		warn("[ItemPickup] Coal had no TaskId — using fallback id")
 		local fallbackId = "coal_" .. player.UserId .. "_" .. tostring(os.clock())
 		TaskSystem.completeTask("coal", fallbackId, player)
 	end
 
-	-- Sound
 	local fpPos = getFireplacePosition()
 	if fpPos then
 		SoundManager.coalIntoFireplace(fpPos)
 	end
 
-	print(string.format("[ItemPickup] %s deposit coal (TaskId=%s) ke fireplace ✓", player.Name, tostring(coalTaskId)))
+	print(string.format("[ItemPickup] %s deposited coal (TaskId=%s)", player.Name, tostring(coalTaskId)))
 end
 
 -- ── Core: Throw Boulder ────────────────────────────────────────
@@ -509,14 +446,17 @@ local function throwBoulder(player: Player)
 		if char and hit:IsDescendantOf(char) then
 			return
 		end
+		if boulderPart.AssemblyLinearVelocity.Magnitude > 5 then
+			return
+		end
 
 		touchConn:Disconnect()
 
-		-- Landing sound + area noise (boulder hits ground hard)
-		SoundManager.coalThrowHit(boulderPart.Position)
+		-- Boulder landed — play impact sound and add world noise for monster
+		SoundManager.boulderHit(boulderPart.Position)
 		SensorSystem.AddAreaNoise(boulderPart.Position, LANDING_NOISE, 40)
 		SensorSystem.AddWorldNoise(boulderPart.Position, LANDING_NOISE)
-		print(string.format("[ItemPickup] Boulder %s mendarat — noise + sound fired", player.Name))
+		print(string.format("[ItemPickup] %s's boulder landed — noise triggered", player.Name))
 
 		task.delay(BOULDER_RESET_TIME, function()
 			if boulderPart and boulderPart.Parent then
@@ -562,7 +502,7 @@ RE_ThrowBoulder.OnServerEvent:Connect(function(player)
 	throwBoulder(player)
 end)
 
--- ── Cleanup saat player leave ───────────────────────────────────
+-- ── Cleanup on disconnect / character removal ───────────────────
 
 Players.PlayerRemoving:Connect(function(player)
 	local data = heldItems[player]

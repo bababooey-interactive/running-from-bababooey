@@ -1,68 +1,93 @@
 -- =============================================================
---  SoundManager.luau  (ModuleScript — Day 8-9)
+--  SoundManager.luau  (ModuleScript)
 --
---  Two parts:
---  1. MonsterSounds: wraps SFX inside SoulDragger > HumanoidRootPart.
---     Triggered by MonsterAI state changes.
---  2. SoundManager.playAt(): one-shot spatial sounds for world
---     events (coal drop, lever pull, etc.). Roblox auto-replicates
---     Sound:Play() on server for workspace parts — clients hear it.
+--  Two responsibilities:
 --
---  AMBIENT HORROR (background loop):
---    Don't put it here. In Studio, add a Sound to SoundService
---    (not workspace), set Looped = true, Volume ~0.4, then set
---    SoundId. It will play automatically for all clients.
---    Search Roblox Creator Store: "horror ambience loop"
+--  1. SoundManager.playAt() + named wrapper functions
+--     One-shot spatial sounds for world events. Roblox replicates
+--     Sound:Play() on a server Part → all clients hear it in 3D.
 --
---  PLAYER SOUNDS (footstep, breathing):
---    Handled client-side in PlayerNoise.client.luau.
---    Add Sound instances to the character or StarterCharacterScripts.
+--  2. SoundManager.new(monster) → MonsterSounds
+--     Drives SFX inside SoulDragger based on AI state changes.
+--     Called by MonsterAI.server.luau and DuplicationSystem.luau.
+--
+--  NOT handled here:
+--    • FireplaceCrackle / AmbientLoop  → SoundService, auto-plays
+--    • Player footsteps / breathing / heartbeat → PlayerNoise.client.luau
+--
+--  Survival feedback sounds (dark zone, hunger) are played at the
+--  player's world position so all nearby players can hear them. If
+--  you want per-player-only sounds, route those through a RemoteEvent
+--  to the specific client instead of using playAt().
+--
+--  PLACEHOLDER IDs:
+--    Entries marked rbxassetid://0 need real asset IDs.
+--    The comment on each line describes what to search for.
 -- =============================================================
 
 local SoundManager = {}
 
 -- ─────────────────────────────────────────────────────────────
---  WORLD SOUND IDs
---  Fill these in with rbxassetid://XXXXXX after uploading.
---  Used by SoundManager.playAt() for task/interaction sounds.
+--  SOUND IDs
 -- ─────────────────────────────────────────────────────────────
 
 SoundManager.Ids = {
-	-- Coal
-	CoalDrop = "rbxassetid://9125869797", -- soft stone thud (search: "rock drop")
-	CoalFireplace = "rbxassetid://128344217763318", -- whoosh + crackle (search: "fire whoosh crackle")
 
-	-- Lever (loud — intentional per design)
-	LeverPull = "rbxassetid://119741178791414", -- heavy mechanical clunk (search: "industrial lever switch")
+	-- ── Coal ─────────────────────────────────────────────────
+	-- Coal hits any surface (floor, wall, fireplace edge, etc.)
+	CoalDrop = "rbxassetid://9125869797",
 
-	-- Battery
-	-- BatteryInsert = "rbxassetid://0", -- soft electrical click (search: "battery click insert")
+	-- Coal successfully lands inside the fireplace
+	CoalFireplace = "rbxassetid://128344217763318",
 
-	-- Item pickup
-	ItemPickup = "rbxassetid://134602992766192", -- light tap (search: "item pickup ui click")
+	-- ── Boulder ──────────────────────────────────────────────
+	-- Boulder lands / collides after being thrown.
+	-- Ideally heavier than CoalDrop; search: "stone impact crash"
+	BoulderHit = "rbxassetid://9125869797",
 
-	-- Fireplace (ambient, placed on the fireplace part itself)
-	FireplaceCrackle = "rbxassetid://236387093", -- looped fire crackle (search: "campfire crackle loop")
+	-- ── Food & Drink ─────────────────────────────────────────
+	-- Carrot or meat hits the floor; search: "food drop thud soft"
+	FoodDrop = "rbxassetid://0",
 
-	FoodDrop = "rbxassetid://9125869797", -- soft organic thud (carrot/meat)
-	WaterDrop = "rbxassetid://5803155853", -- liquid slosh / splash
-	CoalLand = "rbxassetid://9125869797", -- same as CoalDrop, explicit alias
+	-- Waterbottle hits the floor; search: "plastic bottle drop"
+	WaterDrop = "rbxassetid://0",
 
-	CoalThrowHit = "rbxassetid://9125869797", -- heavier impact + slight echo (search: "stone impact wall")
+	-- Player eats food (carrot / meat); search: "eating crunch bite"
+	EatFood = "rbxassetid://0",
+
+	-- Player drinks water; search: "gulp drink water"
+	DrinkWater = "rbxassetid://0",
+
+	-- ── Lever ────────────────────────────────────────────────
+	-- Intentionally loud — generates a large noise event for the monster
+	LeverPull = "rbxassetid://119741178791414",
+
+	-- ── Item Pickup ──────────────────────────────────────────
+	-- Picking up ANY item (coal, food, water, boulder…)
+	ItemPickup = "rbxassetid://134602992766192",
+
+	-- ── Survival feedback ────────────────────────────────────
+	-- Player steps into a dark zone; search: "horror whoosh dark ambient"
+	DarkEnter = "rbxassetid://0",
+
+	-- Dark timer reaching critical; search: "horror sting short"
+	DarkWarning = "rbxassetid://0",
+
+	-- Hunger dropping critically low; search: "stomach growl grumble"
+	HungerWarning = "rbxassetid://0",
 }
 
 -- ─────────────────────────────────────────────────────────────
---  ONE-SHOT WORLD SOUND
---  Creates a temporary invisible part at `position`, attaches
---  a Sound to it, plays it, then destroys everything on Ended.
---  Roblox replicates Sound:Play() from server → all clients hear it.
+--  ONE-SHOT SPATIAL SOUND
+--  Creates a temporary invisible Part at `position`, plays a Sound
+--  on it, then destroys everything when the sound ends.
 -- ─────────────────────────────────────────────────────────────
 
 function SoundManager.playAt(
 	soundId: string,
 	position: Vector3,
 	volume: number?, -- default 0.8
-	maxDist: number? -- default 50 studs (how far the sound travels)
+	maxDist: number? -- default 50 studs
 )
 	if not soundId or soundId == "rbxassetid://0" or soundId == "" then
 		return
@@ -90,7 +115,7 @@ function SoundManager.playAt(
 	sound.Ended:Once(function()
 		anchor:Destroy()
 	end)
-	-- Safety cleanup in case Ended never fires (e.g. ID is invalid)
+	-- Safety cleanup in case Ended never fires (e.g. invalid asset ID)
 	task.delay(10, function()
 		if anchor.Parent then
 			anchor:Destroy()
@@ -98,51 +123,101 @@ function SoundManager.playAt(
 	end)
 end
 
--- Convenience wrappers so TaskSystem doesn't need to know sound IDs
+-- ─────────────────────────────────────────────────────────────
+--  NAMED WRAPPERS
+--  Keep one wrapper per semantic event so callers never hardcode
+--  IDs or volumes and renaming only requires touching this file.
+-- ─────────────────────────────────────────────────────────────
+
+-- Coal --------------------------------------------------------
+
+-- Coal hits any surface (floor, wall, dropped from hand, etc.)
 function SoundManager.coalDrop(position: Vector3)
 	SoundManager.playAt(SoundManager.Ids.CoalDrop, position, 0.65, 35)
 end
-function SoundManager.coalThrowHit(position: Vector3)
-	SoundManager.playAt(SoundManager.Ids.CoalThrowHit, position, 0.85, 40)
-end
+
+-- Coal successfully deposited into the fireplace
 function SoundManager.coalIntoFireplace(position: Vector3)
 	SoundManager.playAt(SoundManager.Ids.CoalFireplace, position, 1.0, 45)
 end
+
+-- Boulder -----------------------------------------------------
+
+-- Boulder lands or collides after a throw
+function SoundManager.boulderHit(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.BoulderHit, position, 0.9, 45)
+end
+
+-- Food & Drink ------------------------------------------------
+
+-- Carrot or meat hits the floor
+function SoundManager.foodDrop(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.FoodDrop, position, 0.5, 25)
+end
+
+-- Waterbottle hits the floor
+function SoundManager.waterDrop(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.WaterDrop, position, 0.5, 25)
+end
+
+-- Player eats food (carrot / meat)
+function SoundManager.eatFood(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.EatFood, position, 0.7, 20)
+end
+
+-- Player drinks water
+function SoundManager.drinkWater(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.DrinkWater, position, 0.7, 20)
+end
+
+-- Lever -------------------------------------------------------
+
+-- Lever pulled — loud on purpose to alert the monster
 function SoundManager.leverPull(position: Vector3)
-	-- Lever is intentionally loud — generates significant noise event
 	SoundManager.playAt(SoundManager.Ids.LeverPull, position, 1.0, 60)
 end
-function SoundManager.batteryInsert(position: Vector3)
-	SoundManager.playAt(SoundManager.Ids.BatteryInsert, position, 0.6, 30)
+
+-- Items -------------------------------------------------------
+
+-- Any item picked up off the ground
+function SoundManager.itemPickup(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.ItemPickup, position, 0.8, 30)
 end
+
+-- Generic light drop fallback (for future item categories)
 function SoundManager.itemDrop(position: Vector3)
-	-- Generic item drop thud (food, lantern, misc) — lighter than coal
-	SoundManager.playAt(SoundManager.Ids.CoalDrop, position, 0.5, 25)
-end
--- Per-item drop sounds (called by ItemPickup when item lands)
-function SoundManager.foodDrop(position: Vector3, itemName: string)
-	local soundId = SoundManager.Ids.FoodDrop
-	local vol = 0.55
-	-- Waterbottle gets a splash sound
-	if itemName:lower():find("water") then
-		soundId = SoundManager.Ids.WaterDrop
-		vol = 0.65
-	end
-	SoundManager.playAt(soundId, position, vol, 28)
+	SoundManager.playAt(SoundManager.Ids.FoodDrop, position, 0.45, 20)
 end
 
-function SoundManager.boulderLand(position: Vector3)
-	SoundManager.playAt(SoundManager.Ids.BoulderLand, position, 0.9, 45)
+-- Survival feedback -------------------------------------------
+-- These play at the player's world position. Nearby players can
+-- also hear them, which adds atmosphere in co-op. To make them
+-- strictly private, fire a RemoteEvent to that client instead.
+
+-- Player enters a dark zone for the first time
+function SoundManager.darkEnter(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.DarkEnter, position, 0.7, 18)
 end
 
-function SoundManager.coalLand(position: Vector3)
-	SoundManager.playAt(SoundManager.Ids.CoalLand, position, 0.65, 35)
+-- Dark timer reaching a warning threshold (10 s, then 5 s)
+function SoundManager.darkWarning(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.DarkWarning, position, 0.9, 18)
+end
+
+-- Hunger dropping to a warning threshold (30 %, then 10 %)
+function SoundManager.hungerWarning(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.HungerWarning, position, 0.7, 18)
 end
 
 -- ─────────────────────────────────────────────────────────────
 --  MONSTER SOUND CONTROLLER
---  SoundManager.new(monster) returns an object that MonsterAI
---  calls to drive the monster's own SFX.
+--  SoundManager.new(monster) returns a MonsterSounds object.
+--  MonsterAI and DuplicationSystem call :onStateChange() and
+--  :playHitSounds() as the monster's state changes.
+--
+--  All Sound instances must already exist inside
+--  SoulDragger > HumanoidRootPart in Studio. Set their SoundId
+--  there; this module only calls :Play() / :Stop() on them.
 -- ─────────────────────────────────────────────────────────────
 
 local MonsterSounds = {}
@@ -152,34 +227,31 @@ function SoundManager.new(monster: Model)
 	local self = setmetatable({}, MonsterSounds)
 	local hrp = monster:FindFirstChild("HumanoidRootPart")
 
-	-- ── Bind to existing Sound instances in the model ────────
-	-- These should already be in SoulDragger > HumanoidRootPart.
-	-- Set their SoundId in Studio Properties.
 	self._m = {
 		Roar = hrp and hrp:FindFirstChild("RoarSFX"),
-		--[[ search: "monster roar horror", "creature growl" ]]
+		-- search: "monster roar horror", "creature growl"
 
 		Footstep = hrp and hrp:FindFirstChild("FootstepSFX"),
-		--[[ search: "heavy stone footstep monster" — set Looped=true ]]
+		-- search: "heavy stone footstep monster" — set Looped = true in Studio
 
 		Bite = hrp and hrp:FindFirstChild("BiteSFX"),
-		--[[ search: "monster bite snap", "creature chomp"   ]]
+		-- search: "monster bite snap", "creature chomp"
 
 		Jumpscare = hrp and hrp:FindFirstChild("JumpscareSFX"),
-		--[[ search: "horror jumpscare sting", "horror stinger" ]]
+		-- search: "horror jumpscare sting", "horror stinger"
 
 		AfterJump = hrp and hrp:FindFirstChild("AfterJumpscareEndSFX"),
-		--[[ search: "horror exhale heavy", "monster breathe out" ]]
+		-- search: "horror exhale heavy", "monster breathe out"
 
 		HeadCut = hrp and hrp:FindFirstChild("HeadCutSFX"),
-		--[[ search: "impact wet flesh", "horror hit impact" ]]
+		-- search: "impact wet flesh", "horror hit impact"
 
 		Spotted = monster:FindFirstChild("Spotted_SFX"),
-		--[[ search: "horror alert sting short"              ]]
+		-- search: "horror alert sting short"
 	}
 
 	self._lastState = ""
-	self._roarCD = 0 -- prevents roar spamming on rapid re-detects
+	self._roarCD = 0 -- prevents roar spam on rapid re-detects
 
 	return self
 end
@@ -198,9 +270,7 @@ function MonsterSounds:_stop(name: string)
 	end
 end
 
--- ── State transitions ─────────────────────────────────────────
-
-function MonsterSounds:onStateChange(newState: string, isChasing: boolean)
+function MonsterSounds:onStateChange(newState: string, _isChasing: boolean)
 	if newState == self._lastState then
 		return
 	end
@@ -209,7 +279,6 @@ function MonsterSounds:onStateChange(newState: string, isChasing: boolean)
 	local footstep = self._m.Footstep
 
 	if newState == "IDLE" then
-		-- Slow/quiet footsteps — or stop if PlayOnlyWhenChasing
 		if footstep then
 			local onlyChase = footstep:FindFirstChild("PlayOnlyWhenChasing")
 			local restrict = onlyChase and onlyChase:IsA("BoolValue") and onlyChase.Value
@@ -224,7 +293,6 @@ function MonsterSounds:onStateChange(newState: string, isChasing: boolean)
 			end
 		end
 	elseif newState == "CHASE" then
-		-- Fast heavy footsteps
 		if footstep then
 			footstep.PlaybackSpeed = 1.55
 			footstep.Volume = 1.0
@@ -232,20 +300,15 @@ function MonsterSounds:onStateChange(newState: string, isChasing: boolean)
 				footstep:Play()
 			end
 		end
-		-- Roar once at chase start (cooldown = 12 seconds)
 		if os.clock() > self._roarCD then
 			self._roarCD = os.clock() + 12
 			self:_play("Roar")
 		end
-		-- "Spotted" sting
 		self:_play("Spotted")
 	elseif newState == "CATCH" then
-		-- Kill movement sounds instantly
 		self:_stop("Footstep")
 		self:_stop("Roar")
-		-- Jumpscare audio
 		self:_play("Jumpscare")
-		-- AfterJump plays when Jumpscare track finishes
 		local jSFX = self._m.Jumpscare
 		if jSFX then
 			jSFX.Ended:Once(function()
@@ -259,8 +322,7 @@ function MonsterSounds:onStateChange(newState: string, isChasing: boolean)
 	end
 end
 
--- ── Called from beginStrike after player is caught ────────────
-
+-- Called from beginStrike after a player is caught
 function MonsterSounds:playHitSounds()
 	self:_play("Bite")
 	task.delay(0.35, function()
