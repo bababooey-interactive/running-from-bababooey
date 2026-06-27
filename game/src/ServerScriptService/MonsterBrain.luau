@@ -596,6 +596,20 @@ function MonsterBrain:_tick(dt: number)
 
 	-- ── Movement — skip entirely while Spotted anim plays ─────
 	if self._spottedAnimPlaying then
+		-- Rotate to face the spotted player in place during the animation
+		if self.chaseTarget and self.chaseTarget.Character then
+			local tHRP = self.chaseTarget.Character:FindFirstChild("HumanoidRootPart")
+			if tHRP then
+				local pivot = self.monster:GetPivot()
+				local flat = Vector3.new(tHRP.Position.X, pivot.Position.Y, tHRP.Position.Z)
+				local dir = flat - pivot.Position
+				if dir.Magnitude > 0.1 then
+					local targetRot = CFrame.lookAt(pivot.Position, pivot.Position + dir.Unit)
+					local smoothed = pivot:Lerp(targetRot, dt * 10)
+					self.monster:PivotTo(CFrame.new(pivot.Position) * smoothed.Rotation)
+				end
+			end
+		end
 		return
 	end
 
@@ -689,7 +703,9 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 			self.lostTimer = math.max(self.lostTimer, effectiveLost * HEAR_LOST_TIMER_RESTORE)
 		else
 			-- No sensor input: count down normally
-			self.lostTimer = self.lostTimer - SENSOR_INT
+			if not self._spottedAnimPlaying then
+				self.lostTimer = self.lostTimer - SENSOR_INT
+			end
 		end
 
 		-- Distraction by anonymous world noise
