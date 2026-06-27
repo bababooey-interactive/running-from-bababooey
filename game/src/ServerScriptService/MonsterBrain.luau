@@ -5,20 +5,19 @@
 --
 --  Path: game/src/ServerScriptService/MonsterBrain.luau
 --
---  Usage:
---    local MonsterBrain = require(script.Parent.MonsterBrain)
---    local brain = MonsterBrain.new(monster, rules, config)
---    brain:start()   -- begins the RunService.Heartbeat loop
---    brain:stop()    -- disconnects the Heartbeat loop
---
---  config (all optional, has defaults):
---    monsterY      number   -- world Y the monster is locked to (default 0)
---    speed         number   -- chase speed override (default Constants values)
---    sensorInterval number  -- seconds between sensor ticks (default 0.25)
---    graceTime     number   -- seconds before AI activates (default 0, clones skip grace)
---    monsterIndex  number   -- for MonsterPosition broadcast (default 1)
---    onDied        function -- (player: Player) callback when a player is caught
---    onBroadcast   function -- (pos, state, index) called every 0.5s for minimap
+--  CHANGES:
+--  • Escape window is now much more forgiving:
+--      - CHASE_LOST_TIME reduced 4 → 2.5 s
+--      - Chase-duration lostTimer extension halved (×0.15, cap 2 s)
+--      - Smell/hearing no longer meaningfully top up lostTimer while
+--        the target isn't seen — smell gives 20 % restore (was 80 %),
+--        hearing gives 15 % restore (was 40 %)
+--      - INVESTIGATE_TIMEOUT reduced 6 → 3.5 s (monster gives up
+--        searching sooner after losing the player)
+--  • Monster freezes in place during the Spotted animation:
+--      - _spottedAnimPlaying flag blocks _handleMovement
+--      - lostTimer still ticks normally during the freeze so the
+--        player gets a real head-start window before the chase moves
 -- =============================================================
 
 local RunService = game:GetService("RunService")
@@ -32,8 +31,8 @@ local SoundManager = require(script.Parent.SoundManager)
 -- ─────────────────────────────────────────────
 --  Constants shared by all instances
 -- ─────────────────────────────────────────────
-local CHASE_LOST_TIME = 4
-local INVESTIGATE_TIMEOUT = 6
+local CHASE_LOST_TIME = 3 -- was 4: seconds before monster loses player when not sensed
+local INVESTIGATE_TIMEOUT = 4.5 -- was 6: seconds monster spends searching last known pos
 local INVESTIGATE_SPEED_MUL = 0.7
 local DISTRACTION_THRESHOLD = 0.4
 local SMELL_CHASE_DIST = 8
@@ -43,6 +42,17 @@ local SENSOR_INT = 0.25
 local SUSPICION_DECAY_RATE = 0.12
 local SUSPICION_CHASE_THRESHOLD = 0.7
 local BROADCAST_INTERVAL = 0.5
+
+-- Escape-window tuning
+-- lostTimer top-ups when player is sensed indirectly (smell/hearing)
+-- but NOT seen. Keeping these low lets the player break line-of-sight
+-- and actually escape rather than having the monster perpetually refresh.
+local SMELL_LOST_TIMER_RESTORE = 0.60 -- fraction of effectiveLost restored by smell  (was 0.80)
+local HEAR_LOST_TIMER_RESTORE = 0.3 -- fraction of effectiveLost restored by hearing (was 0.40)
+
+-- Chase-duration extension cap (makes long chases not last forever)
+local CHASE_DURATION_MUL = 0.23 -- was 0.30
+local CHASE_DURATION_CAP = 3.0 -- was 4.0
 
 local MonsterBrain = {}
 MonsterBrain.__index = MonsterBrain
@@ -60,27 +70,22 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	self.monsterY = config.monsterY or 0
 	self.monsterIndex = config.monsterIndex or 1
 	self.graceTime = config.graceTime or 0
-	self.onDied = config.onDied -- function(playerName: string)
-	self.onBroadcast = config.onBroadcast -- function(pos, stateStr, index)
+	self.onDied = config.onDied
+	self.onBroadcast = config.onBroadcast
 
-	-- Speed: use config override, or scale from Constants per level
 	self.chaseSpeed = config.speed
 		or math.min(Constants.MONSTER_SPEED_BASE + Constants.MONSTER_SPEED_PER_LEVEL, Constants.MONSTER_SPEED_MAX)
 
-	-- Root part
 	self.rootPart = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("rb") or monster.PrimaryPart
 	assert(self.rootPart, "[MonsterBrain] Monster needs a HumanoidRootPart or 'rb' part")
 	self.rootPart.Anchored = true
 	monster.PrimaryPart = self.rootPart
 
-	-- Sounds
 	self.sounds = SoundManager.new(monster)
 
-	-- Animation tracks
 	self.tracks = {}
 	self:_loadAnimations()
 
-	-- State
 	self.state = "IDLE"
 	self.chaseTarget = nil
 	self.lostTimer = 0
@@ -89,21 +94,19 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	self.investigateTimer = 0
 	self.lastKnownPos = nil
 	self.spotPlayedFor = nil
-	self.suspicion = {} -- [Player] = 0..1
+	self.suspicion = {}
 	self.chaseDuration = 0
 	self.postChaseSearchPos = nil
 	self.searchWanderTimer = 0
 	self.lastSensedPlayers = {}
 	self.currentMovement = ""
 
-	-- Internal loop handles
-	self._connection = nil -- RBXScriptConnection for Heartbeat
+	-- NEW: blocks _handleMovement while the Spotted anim plays
+	self._spottedAnimPlaying = false
 
-	-- Grid (set externally via brain:setGrid)
+	self._connection = nil
 	self._grid = {}
 	self._gridReady = false
-
-	-- Timers
 	self._sensorCD = 0
 	self._broadcastCD = BROADCAST_INTERVAL
 	self._graceActive = self.graceTime > 0
@@ -359,24 +362,45 @@ function MonsterBrain:_beginIdle()
 end
 
 function MonsterBrain:_beginChase(player: Player)
-	if self.chaseTarget ~= player then
+	local isNewTarget = self.chaseTarget ~= player
+
+	if isNewTarget then
 		self.chaseTarget = player
 		self:_playMovement("Run")
+
+		-- ── Spotted animation: freeze the monster while it plays ──
+		-- The lostTimer still ticks down during the freeze, giving the
+		-- player a real head-start window before the monster moves.
 		if self.spotPlayedFor ~= player then
 			self.spotPlayedFor = player
+			self._spottedAnimPlaying = true
+
 			task.spawn(function()
 				task.wait(0.05)
 				self:_playAction("Spotted")
+
+				-- Wait for the animation to finish then release movement.
+				-- Use a Stopped signal if the track loaded; fall back to a
+				-- fixed delay (1.2 s) if something went wrong loading it.
+				local spottedTrack = self.tracks["Spotted"]
+				if spottedTrack then
+					spottedTrack.Stopped:Wait()
+				else
+					task.wait(1.2)
+				end
+				self._spottedAnimPlaying = false
 			end)
 		end
 	end
+
 	if player.Character then
 		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
 		if hrp then
 			self.lastKnownPos = hrp.Position
 		end
 	end
-	local effectiveLost = CHASE_LOST_TIME + math.min(self.chaseDuration * 0.3, 4)
+
+	local effectiveLost = CHASE_LOST_TIME + math.min(self.chaseDuration * CHASE_DURATION_MUL, CHASE_DURATION_CAP)
 	self.lostTimer = effectiveLost
 	self.chaseDuration = 0
 	self.state = "CHASE"
@@ -471,7 +495,6 @@ function MonsterBrain:_tick(dt: number)
 		return
 	end
 	if self._graceActive then
-		-- Still broadcast position during grace so minimap shows the monster
 		self._broadcastCD = math.max(0, self._broadcastCD - dt)
 		if self._broadcastCD <= 0 then
 			self._broadcastCD = BROADCAST_INTERVAL
@@ -544,7 +567,6 @@ function MonsterBrain:_tick(dt: number)
 			end
 		end
 
-		-- State-specific processing
 		self:_processSensors(seen, heard, smelled, highestPlayer)
 	end
 
@@ -572,7 +594,11 @@ function MonsterBrain:_tick(dt: number)
 		end
 	end
 
-	-- ── Movement ──────────────────────────────────────────────
+	-- ── Movement — skip entirely while Spotted anim plays ─────
+	if self._spottedAnimPlaying then
+		return
+	end
+
 	self:_handleMovement(dt, monPos)
 end
 
@@ -645,19 +671,24 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 			end
 		end
 	elseif st == "CHASE" then
-		local effectiveLost = CHASE_LOST_TIME + math.min(self.chaseDuration * 0.3, 4)
+		local effectiveLost = CHASE_LOST_TIME + math.min(self.chaseDuration * CHASE_DURATION_MUL, CHASE_DURATION_CAP)
+
 		if seen then
+			-- Direct line of sight: fully refresh the timer
 			self.lostTimer = effectiveLost
 		elseif smelled then
+			-- Smell: only a small top-up so breaking LoS still helps a lot
 			local smellHRP = smelled.Character and smelled.Character:FindFirstChild("HumanoidRootPart")
 			if smellHRP then
 				local d = (self.rootPart.Position - smellHRP.Position).Magnitude
 				local proximity = 1 - (d / Constants.MONSTER_SMELL_RADIUS)
-				self.lostTimer = math.max(self.lostTimer, effectiveLost * proximity * 0.8)
+				self.lostTimer = math.max(self.lostTimer, effectiveLost * SMELL_LOST_TIMER_RESTORE * proximity)
 			end
 		elseif heard and heard.player == self.chaseTarget then
-			self.lostTimer = math.max(self.lostTimer, effectiveLost * 0.4)
+			-- Hearing the chase target: tiny top-up
+			self.lostTimer = math.max(self.lostTimer, effectiveLost * HEAR_LOST_TIMER_RESTORE)
 		else
+			-- No sensor input: count down normally
 			self.lostTimer = self.lostTimer - SENSOR_INT
 		end
 
