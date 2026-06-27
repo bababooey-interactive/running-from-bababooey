@@ -1,70 +1,108 @@
 -- =============================================================
---  SensorSystem.luau
+--  SensorSystem.luau  (ModuleScript)
+--  Path: game/src/ServerScriptService/SensorSystem.luau
+--
+--  Centralises all monster-perception logic:
+--    • Noise store  — players and world events emit noise with TTL;
+--                     AddNoise / AddAreaNoise / AddWorldNoise write it,
+--                     CheckHearing reads it.
+--    • Smell        — proximity check when MONSTER_SMELL is active.
+--    • Vision       — cone + occlusion + lit-area check when
+--                     MONSTER_SEE is active.
+--    • Awareness    — 0-1 scalar sent to each player's HUD.
+--
+--  Light cache:
+--    PointLights tagged "MapLights" are tracked via CollectionService
+--    so IsPlayerInLight does not call GetTagged() every frame.
 -- =============================================================
 
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 
 local SensorSystem = {}
 
--- ─── LIGHT CACHING SYSTEM ──────────────────────────────────────
-local activeLights = {}
+-- ─────────────────────────────────────────────
+--  CONSTANTS
+-- ─────────────────────────────────────────────
 
--- 1. Grab all existing lights right now
+local NOISE_LIFETIME = 1.2 -- seconds a noise event lives
+local LIGHT_RANGE_BONUS = 1.25 -- extend each PointLight's range by this factor for vision checks
+local SMELL_CHASE_THRESHOLD = 0.25 -- suspicion contribution cap per smell tick (used externally)
+local WORLD_NOISE_MERGE_DIST = 10 -- studs: merge anonymous noise events closer than this
+
+-- ─────────────────────────────────────────────
+--  LIGHT CACHE
+-- ─────────────────────────────────────────────
+
+local activeLights: { PointLight } = {}
+
 for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
 	table.insert(activeLights, light)
 end
 
--- 2. Listen for any new lights spawned by MapGenerator later
 CollectionService:GetInstanceAddedSignal("MapLights"):Connect(function(light)
 	table.insert(activeLights, light)
 end)
 
--- 3. Remove lights from our list if they are destroyed (e.g., a breaker trips)
 CollectionService:GetInstanceRemovedSignal("MapLights"):Connect(function(light)
-	local index = table.find(activeLights, light)
-	if index then
-		table.remove(activeLights, index)
+	local idx = table.find(activeLights, light)
+	if idx then
+		table.remove(activeLights, idx)
 	end
 end)
--- ───────────────────────────────────────────────────────────────
 
--- ─── Noise Store ──────────────────────────────────────────────
+-- ─────────────────────────────────────────────
+--  NOISE STORE
+-- ─────────────────────────────────────────────
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE_AwarenessUpdated = Remotes:WaitForChild("AwarenessUpdated")
 
 type NoiseEvent = {
-	player: Player?, -- nil for anonymous/world noise (lever, boulder, etc.)
+	player: Player?, -- nil = anonymous world noise (lever, boulder, …)
 	position: Vector3,
-	level: number,
-	expireAt: number,
+	level: number, -- 0–1
+	expireAt: number, -- os.clock() timestamp
 }
 
 local noiseEvents: { NoiseEvent } = {}
-local NOISE_LIFETIME = 1.2
 
+-- Remove expired entries (call before any noise read).
+local function cleanNoise()
+	local now = os.clock()
+	for i = #noiseEvents, 1, -1 do
+		if now >= noiseEvents[i].expireAt then
+			table.remove(noiseEvents, i)
+		end
+	end
+end
+
+-- ─────────────────────────────────────────────
+--  PUBLIC: AddNoise
+--  Emit (or refresh) a noise event for a specific player.
+--  If an event for this player already exists, keep the loudest level.
+-- ─────────────────────────────────────────────
 function SensorSystem.AddNoise(player: Player, position: Vector3, level: number)
 	local clamped = math.clamp(level, 0, 1)
 	local expireAt = os.clock() + NOISE_LIFETIME
-	local finalLevel = clamped
+	local emitted = clamped
 
-	-- Replace existing event for this player if one exists
 	local found = false
 	for _, event in ipairs(noiseEvents) do
 		if event.player == player then
 			event.position = position
-			event.level = math.max(event.level, clamped) -- keep loudest
+			event.level = math.max(event.level, clamped)
 			event.expireAt = expireAt
-			finalLevel = event.level
+			emitted = event.level
 			found = true
 			break
 		end
 	end
 
 	if not found then
-		-- No existing event, insert fresh
 		table.insert(noiseEvents, {
 			player = player,
 			position = position,
@@ -73,18 +111,16 @@ function SensorSystem.AddNoise(player: Player, position: Vector3, level: number)
 		})
 	end
 
-	if player then
-		RE_AwarenessUpdated:FireClient(player, nil, finalLevel)
-	end
+	-- Push the current noise level to the player's awareness HUD.
+	RE_AwarenessUpdated:FireClient(player, nil, emitted)
 end
 
--- ─── Area Noise ──────────────────────────────────────────────
--- Creates noise events for ALL players within `radius` of `position`.
--- Closer players get higher noise (linear falloff).
--- Used for loud world events like lever pulls, item drops, etc.
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: AddAreaNoise
+--  Emit noise for every player within `radius` studs of `position`,
+--  attenuated by distance (linear falloff).
+-- ─────────────────────────────────────────────
 function SensorSystem.AddAreaNoise(position: Vector3, level: number, radius: number)
-	local Players = game:GetService("Players")
 	local clamped = math.clamp(level, 0, 1)
 
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -98,37 +134,35 @@ function SensorSystem.AddAreaNoise(position: Vector3, level: number, radius: num
 		end
 
 		local dist = (hrp.Position - position).Magnitude
-		if dist <= radius then
-			local distanceFactor = 1 - (dist / radius)
-			local noiseLevel = clamped * distanceFactor
-			if noiseLevel > 0.05 then
-				SensorSystem.AddNoise(player, position, noiseLevel)
-			end
+		if dist > radius then
+			continue
+		end
+
+		local attenuated = clamped * (1 - dist / radius)
+		if attenuated > 0.05 then
+			SensorSystem.AddNoise(player, position, attenuated)
 		end
 	end
 end
 
--- ─── World Noise (anonymous) ──────────────────────────────────
--- Creates an anonymous noise event (player = nil) for world events
--- like lever pulls, boulder landings, item drops.
--- The monster hears the sound but doesn't know WHO made it —
--- it will INVESTIGATE the position instead of chasing a player.
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: AddWorldNoise
+--  Emit an anonymous noise event (player = nil) so the monster
+--  investigates the position without knowing which player caused it.
+--  Nearby duplicate world-noise events are merged (loudest wins).
+-- ─────────────────────────────────────────────
 function SensorSystem.AddWorldNoise(position: Vector3, level: number)
 	local clamped = math.clamp(level, 0, 1)
 	local expireAt = os.clock() + NOISE_LIFETIME
 
-	-- Replace existing world noise if one is nearby (within 10 studs)
 	for _, event in ipairs(noiseEvents) do
-		if event.player == nil then
-			if (event.position - position).Magnitude < 10 then
-				if clamped > event.level then
-					event.position = position
-					event.level = clamped
-					event.expireAt = expireAt
-				end
-				return
+		if event.player == nil and (event.position - position).Magnitude < WORLD_NOISE_MERGE_DIST then
+			if clamped > event.level then
+				event.position = position
+				event.level = clamped
+				event.expireAt = expireAt
 			end
+			return
 		end
 	end
 
@@ -140,46 +174,51 @@ function SensorSystem.AddWorldNoise(position: Vector3, level: number)
 	})
 end
 
-local function cleanNoise()
-	local now = os.clock()
-	for i = #noiseEvents, 1, -1 do
-		if now >= noiseEvents[i].expireAt then
-			table.remove(noiseEvents, i)
-		end
-	end
-end
-
--- ─── Hearing ──────────────────────────────────────────────────
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: CheckHearing
+--  Returns the loudest unexpired noise event within
+--  MONSTER_HEAR_RADIUS, or nil if MONSTER_HEAR is inactive.
+-- ─────────────────────────────────────────────
 function SensorSystem.CheckHearing(monsterPos: Vector3, activeRules: { string }): NoiseEvent?
 	if not table.find(activeRules, Constants.Rules.MONSTER_HEAR) then
 		return nil
 	end
+
 	cleanNoise()
+
 	local hearRadius = Constants.MONSTER_HEAR_RADIUS
 	local best: NoiseEvent? = nil
 	local bestScore = 0
+
 	for _, event in ipairs(noiseEvents) do
 		local dist = (monsterPos - event.position).Magnitude
-		if dist <= hearRadius then
-			local score = event.level * (1 - dist / hearRadius)
-			if score > bestScore then
-				bestScore = score
-				best = event
-			end
+		if dist > hearRadius then
+			continue
+		end
+
+		local score = event.level * (1 - dist / hearRadius)
+		if score > bestScore then
+			bestScore = score
+			best = event
 		end
 	end
+
 	return best
 end
 
--- ─── Smell ─────────────────────
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: CheckSmell
+--  Returns the closest player within MONSTER_SMELL_RADIUS,
+--  or nil if MONSTER_SMELL is inactive.
+-- ─────────────────────────────────────────────
 function SensorSystem.CheckSmell(monsterPos: Vector3, players: { Player }, activeRules: { string }): Player?
 	if not table.find(activeRules, Constants.Rules.MONSTER_SMELL) then
 		return nil
 	end
+
 	local closest: Player? = nil
 	local closestDist = Constants.MONSTER_SMELL_RADIUS
+
 	for _, player in ipairs(players) do
 		local char = player.Character
 		if not char then
@@ -189,42 +228,42 @@ function SensorSystem.CheckSmell(monsterPos: Vector3, players: { Player }, activ
 		if not hrp then
 			continue
 		end
+
 		local dist = (monsterPos - hrp.Position).Magnitude
 		if dist < closestDist then
 			closestDist = dist
 			closest = player
 		end
 	end
+
 	return closest
 end
 
--- ─── Lit-area check ───────────────────────────────────
--- Player dianggap "in light" kalau dekat PointLight yang cukup terang,
--- OR kalau global ambient sangat terang (game terlalu terang).
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: IsPlayerInLight
+--  Returns true if `playerPos` falls inside any active tagged PointLight.
+-- ─────────────────────────────────────────────
 function SensorSystem.IsPlayerInLight(playerPos: Vector3): boolean
-	-- INSTEAD OF THIS: for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
-	-- WE USE OUR CACHE:
 	for _, light in ipairs(activeLights) do
-		-- Make sure the light actually exists and is turned on
-		if light:IsA("PointLight") and light.Enabled then
-			local lightPart = light.Parent
-			if lightPart then
-				local dist = (playerPos - lightPart.Position).Magnitude
-
-				-- If the player is inside the light's radius, they are visible!
-				if dist <= light.Range * 1.25 then -- 25% further reach
-					return true
-				end
-			end
+		if not (light:IsA("PointLight") and light.Enabled) then
+			continue
+		end
+		local part = light.Parent
+		if not part then
+			continue
+		end
+		if (playerPos - part.Position).Magnitude <= light.Range * LIGHT_RANGE_BONUS then
+			return true
 		end
 	end
-
 	return false
 end
 
--- ─── Vision ─────────────────
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: CheckVision
+--  Returns the first player seen by the monster (cone + occlusion +
+--  lit area), or nil if MONSTER_SEE is inactive.
+-- ─────────────────────────────────────────────
 function SensorSystem.CheckVision(
 	monster: Model,
 	monsterPos: Vector3,
@@ -243,7 +282,7 @@ function SensorSystem.CheckVision(
 	local visionRange = Constants.MONSTER_VISION_RANGE
 	local halfAngleCos = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
 	local forward = rootPart.CFrame.LookVector
-	local eyePos = monsterPos + Vector3.new(0, 1.5, 0) -- monster eye height
+	local eyePos = monsterPos + Vector3.new(0, 1.5, 0)
 
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -264,36 +303,34 @@ function SensorSystem.CheckVision(
 			continue
 		end
 
-		-- ── 1. Cone check ─────────────────────────────────────
+		-- 1. Cone check
 		if forward:Dot(dir.Unit) < halfAngleCos then
 			continue
 		end
 
-		-- ── 2. Occlusion raycast (WALL CHECK) ─────────────────
-		local playerHeadPos = hrp.Position + Vector3.new(0, 1.5, 0)
-		local rayDir = playerHeadPos - eyePos
-
-		-- Ignore BOTH the monster and the player.
-		-- If the ray hits anything now, it MUST be a wall/obstacle.
+		-- 2. Wall occlusion — any hit means blocked
+		local headPos = hrp.Position + Vector3.new(0, 1.5, 0)
 		rayParams.FilterDescendantsInstances = { monster, char }
-
-		local blocked = workspace:Raycast(eyePos, rayDir, rayParams)
-		if blocked then
-			continue -- Wall detected!
+		if workspace:Raycast(eyePos, headPos - eyePos, rayParams) then
+			continue
 		end
 
-		-- ── 3. Player must be in lit area ─────────────────────
+		-- 3. Player must be standing in light
 		if not SensorSystem.IsPlayerInLight(hrp.Position) then
 			continue
 		end
 
 		return player
 	end
+
 	return nil
 end
 
--- ─── Awareness level for UI ───────────────────────────────────
-
+-- ─────────────────────────────────────────────
+--  PUBLIC: GetAwarenessForPlayer
+--  Returns a 0-1 scalar representing how aware the monster is of
+--  `player` right now (used by the client HUD awareness meter).
+-- ─────────────────────────────────────────────
 function SensorSystem.GetAwarenessForPlayer(
 	monsterPos: Vector3,
 	monster: Model,
@@ -302,6 +339,11 @@ function SensorSystem.GetAwarenessForPlayer(
 	isChasing: boolean,
 	chaseTarget: Player?
 ): number
+	-- Actively chasing this player → maximum awareness
+	if isChasing and chaseTarget == player then
+		return 1.0
+	end
+
 	local char = player.Character
 	if not char then
 		return 0
@@ -311,13 +353,10 @@ function SensorSystem.GetAwarenessForPlayer(
 		return 0
 	end
 
-	if isChasing and chaseTarget == player then
-		return 1.0
-	end
-
 	local playerPos = hrp.Position
 	local awareness = 0
 
+	-- Hearing contribution
 	if table.find(activeRules, Constants.Rules.MONSTER_HEAR) then
 		cleanNoise()
 		for _, event in ipairs(noiseEvents) do
@@ -326,12 +365,13 @@ function SensorSystem.GetAwarenessForPlayer(
 			end
 			local dist = (monsterPos - event.position).Magnitude
 			if dist <= Constants.MONSTER_HEAR_RADIUS then
-				local c = event.level * (1 - dist / Constants.MONSTER_HEAR_RADIUS) * 0.85
-				awareness = math.max(awareness, c)
+				local contrib = event.level * (1 - dist / Constants.MONSTER_HEAR_RADIUS) * 0.85
+				awareness = math.max(awareness, contrib)
 			end
 		end
 	end
 
+	-- Smell contribution
 	if table.find(activeRules, Constants.Rules.MONSTER_SMELL) then
 		local dist = (monsterPos - playerPos).Magnitude
 		if dist <= Constants.MONSTER_SMELL_RADIUS then
@@ -339,30 +379,33 @@ function SensorSystem.GetAwarenessForPlayer(
 		end
 	end
 
+	-- Vision contribution
 	if table.find(activeRules, Constants.Rules.MONSTER_SEE) then
-		local rp = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("rb") or monster.PrimaryPart
-		if rp then
+		local rootPart = monster:FindFirstChild("HumanoidRootPart")
+			or monster:FindFirstChild("rb")
+			or monster.PrimaryPart
+
+		if rootPart then
 			local eyePos = monsterPos + Vector3.new(0, 1.5, 0)
-			local playerHeadPos = hrp.Position + Vector3.new(0, 1.5, 0)
-			local dir = playerHeadPos - eyePos
+			local headPos = playerPos + Vector3.new(0, 1.5, 0)
+			local dir = headPos - eyePos
 			local dist = dir.Magnitude
 
 			if dist >= 0.1 and dist <= Constants.MONSTER_VISION_RANGE then
-				local cosA = rp.CFrame.LookVector:Dot(dir.Unit)
-				local half = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
+				local cosA = rootPart.CFrame.LookVector:Dot(dir.Unit)
+				local halfCos = math.cos(math.rad(Constants.MONSTER_VISION_ANGLE))
 
-				if cosA >= half then
-					-- WALL CHECK for the Awareness UI
+				if cosA >= halfCos then
 					local rayParams = RaycastParams.new()
 					rayParams.FilterType = Enum.RaycastFilterType.Exclude
 					rayParams.FilterDescendantsInstances = { monster, char }
 
 					local blocked = workspace:Raycast(eyePos, dir, rayParams)
-
 					if not blocked then
 						local inLight = SensorSystem.IsPlayerInLight(playerPos)
-						local contrib = inLight and (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA
-							or (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * 0.05
+						-- Dimly visible even in shadow (5 % factor); full factor in light
+						local lightFactor = inLight and 1 or 0.05
+						local contrib = (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * lightFactor
 						awareness = math.max(awareness, contrib)
 					end
 				end
@@ -373,18 +416,26 @@ function SensorSystem.GetAwarenessForPlayer(
 	return math.clamp(awareness, 0, 1)
 end
 
+-- ─────────────────────────────────────────────
+--  PUBLIC: GetRecentNoiseForPlayer
+--  Returns the highest decayed noise level for `player` in the store.
+--  Used by the client HUD noise bar.
+-- ─────────────────────────────────────────────
 function SensorSystem.GetRecentNoiseForPlayer(player: Player): number
 	cleanNoise()
 	local now = os.clock()
 	local highest = 0
+
 	for _, event in ipairs(noiseEvents) do
-		if event.player == player then
-			-- fade out as the event approaches expiry
-			local age = 1 - ((event.expireAt - now) / NOISE_LIFETIME)
-			local decayed = event.level * (1 - age)
-			highest = math.max(highest, decayed)
+		if event.player ~= player then
+			continue
 		end
+		-- Linearly decay from full level down to 0 as the event ages.
+		local age = 1 - (event.expireAt - now) / NOISE_LIFETIME -- 0 (fresh) → 1 (expiring)
+		local decayed = event.level * (1 - age)
+		highest = math.max(highest, decayed)
 	end
+
 	return highest
 end
 
