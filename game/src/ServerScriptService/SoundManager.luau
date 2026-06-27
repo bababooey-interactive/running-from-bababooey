@@ -30,7 +30,6 @@ local SoundManager = {}
 SoundManager.Ids = {
 	-- Coal
 	CoalDrop = "rbxassetid://9125869797", -- soft stone thud (search: "rock drop")
-	CoalThrowHit = "rbxassetid://9125869797", -- heavier impact + slight echo (search: "stone impact wall")
 	CoalFireplace = "rbxassetid://128344217763318", -- whoosh + crackle (search: "fire whoosh crackle")
 
 	-- Lever (loud — intentional per design)
@@ -44,6 +43,12 @@ SoundManager.Ids = {
 
 	-- Fireplace (ambient, placed on the fireplace part itself)
 	FireplaceCrackle = "rbxassetid://236387093", -- looped fire crackle (search: "campfire crackle loop")
+
+	FoodDrop = "rbxassetid://9125869797", -- soft organic thud (carrot/meat)
+	WaterDrop = "rbxassetid://5803155853", -- liquid slosh / splash
+	CoalLand = "rbxassetid://9125869797", -- same as CoalDrop, explicit alias
+
+	CoalThrowHit = "rbxassetid://9125869797", -- heavier impact + slight echo (search: "stone impact wall")
 }
 
 -- ─────────────────────────────────────────────────────────────
@@ -113,6 +118,25 @@ end
 function SoundManager.itemDrop(position: Vector3)
 	-- Generic item drop thud (food, lantern, misc) — lighter than coal
 	SoundManager.playAt(SoundManager.Ids.CoalDrop, position, 0.5, 25)
+end
+-- Per-item drop sounds (called by ItemPickup when item lands)
+function SoundManager.foodDrop(position: Vector3, itemName: string)
+	local soundId = SoundManager.Ids.FoodDrop
+	local vol = 0.55
+	-- Waterbottle gets a splash sound
+	if itemName:lower():find("water") then
+		soundId = SoundManager.Ids.WaterDrop
+		vol = 0.65
+	end
+	SoundManager.playAt(soundId, position, vol, 28)
+end
+
+function SoundManager.boulderLand(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.BoulderLand, position, 0.9, 45)
+end
+
+function SoundManager.coalLand(position: Vector3)
+	SoundManager.playAt(SoundManager.Ids.CoalLand, position, 0.65, 35)
 end
 
 -- ─────────────────────────────────────────────────────────────

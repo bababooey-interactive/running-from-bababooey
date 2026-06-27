@@ -64,6 +64,8 @@ local THROWABLE_BOULDER_NAMES = {
 	boulder_medium = true,
 }
 local CARRY_WELD_OFFSET = CFrame.new(0, -0.15, -1.2) * CFrame.Angles(math.rad(-20), 0, 0)
+local MIN_FALL_DISTANCE = 1    -- studs; tiny gate so sound plays on real collision, not at drop moment
+local MIN_IMPACT_VELOCITY = 10 -- studs/s; filters out barely-moving contacts
 
 -- ── State ──────────────────────────────────────────────────────
 local heldItems = {}
@@ -320,20 +322,72 @@ local function dropItem(player)
 			end
 		end
 
-		-- Sound & area noise when item hits the ground
-		local dropPos = data.model:GetPivot().Position
-		if data.category == "coal" then
-			SoundManager.coalDrop(dropPos)
-			SensorSystem.AddAreaNoise(dropPos, 0.5, 30)
-			SensorSystem.AddWorldNoise(dropPos, 0.5)
-		elseif data.category == "boulder" then
-			SoundManager.coalThrowHit(dropPos)
-			SensorSystem.AddAreaNoise(dropPos, 0.7, 35)
-			SensorSystem.AddWorldNoise(dropPos, 0.7)
-		else
-			SoundManager.itemDrop(dropPos)
-			SensorSystem.AddAreaNoise(dropPos, 0.35, 25)
-			SensorSystem.AddWorldNoise(dropPos, 0.35)
+		-- Unanchor so the item falls naturally under gravity
+		for _, desc in ipairs(data.model:GetDescendants()) do
+			if desc:IsA("BasePart") then
+				desc.Anchored = false
+				desc.CanCollide = true
+			end
+		end
+		local primary = getPrimaryOrFirstPart(data.model)
+		if primary then
+			primary.Anchored = false
+			primary.CanCollide = true
+		end
+
+		-- Sound & noise fire ON LANDING (Touched), not instantly
+		local droppedModel = data.model
+		local droppedCat = data.category
+		local droppedName = droppedModel and droppedModel.Name or ""
+		local droppedPart = droppedModel and getPrimaryOrFirstPart(droppedModel)
+
+		if droppedPart then
+			local dropPos = droppedPart.Position
+			local touchConn
+			touchConn = droppedPart.Touched:Connect(function(hit)
+				-- Ignore the player character that just dropped it
+				if player.Character and hit:IsDescendantOf(player.Character) then
+					return
+				end
+				-- Only play sound for meaningful impacts:
+				--   traveled >= MIN_FALL_DISTANCE from drop point, OR hit with >= MIN_IMPACT_VELOCITY
+				local travelDist = (dropPos - droppedPart.Position).Magnitude
+				local impactVel = droppedPart.AssemblyLinearVelocity.Magnitude
+				if travelDist < MIN_FALL_DISTANCE and impactVel < MIN_IMPACT_VELOCITY then
+					return
+				end
+
+				touchConn:Disconnect()
+
+				local landPos = droppedPart.Position
+
+				if droppedCat == "coal" then
+					SoundManager.coalLand(landPos)
+					SensorSystem.AddAreaNoise(landPos, 0.5, 30)
+					SensorSystem.AddWorldNoise(landPos, 0.5)
+				elseif droppedCat == "boulder" then
+					SoundManager.boulderLand(landPos)
+					SensorSystem.AddAreaNoise(landPos, 0.7, 35)
+					SensorSystem.AddWorldNoise(landPos, 0.7)
+				elseif droppedCat == "food" then
+					SoundManager.foodDrop(landPos, droppedName)
+					SensorSystem.AddAreaNoise(landPos, 0.3, 22)
+					SensorSystem.AddWorldNoise(landPos, 0.3)
+				else
+					SoundManager.itemDrop(landPos)
+					SensorSystem.AddAreaNoise(landPos, 0.3, 22)
+					SensorSystem.AddWorldNoise(landPos, 0.3)
+				end
+			end)
+
+			-- Safety: if physics never fires a valid Touched (e.g. item lands on a non-collidable),
+			-- clean up the connection after 4s
+			task.delay(4, function()
+				if touchConn then
+					touchConn:Disconnect()
+					touchConn = nil
+				end
+			end)
 		end
 	end
 
@@ -453,9 +507,6 @@ local function throwBoulder(player: Player)
 	local touchConn
 	touchConn = boulderPart.Touched:Connect(function(hit)
 		if char and hit:IsDescendantOf(char) then
-			return
-		end
-		if boulderPart.AssemblyLinearVelocity.Magnitude > 5 then
 			return
 		end
 
