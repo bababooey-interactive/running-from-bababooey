@@ -8,9 +8,9 @@
 --
 -- Spotted-animation freeze:
 --   When a player is first seen the monster locks in place to play the Spotted
---   animation. Movement is blocked via _spottedAnimPlaying, but lostTimer still
---   ticks down normally — so breaking line-of-sight during the freeze gives the
---   player a real escape window before the monster starts moving.
+--   animation. Movement is blocked, AND the lostTimer is frozen.
+--   This gives the player a physical head start, but guarantees the monster
+--   will hunt them down once the roar finishes.
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -107,7 +107,6 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	self.currentMovement = ""
 
 	-- Blocks _handleMovement while the Spotted animation plays.
-	-- lostTimer still ticks during this time so escaping is possible.
 	self._spottedAnimPlaying = false
 
 	self._connection = nil
@@ -358,8 +357,9 @@ function MonsterBrain:_beginChase(player: Player)
 		self:_playMovement("Run")
 
 		-- Play the Spotted animation and freeze movement until it finishes.
-		-- lostTimer ticks normally during the freeze so the player can escape
-		-- by breaking line-of-sight before the monster starts moving.
+		-- lostTimer is also frozen during this time to make the game harder.
+		-- The player gets a physical head start, but guarantees the monster
+		-- will hunt them with a full timer once the roar finishes.
 		if self.spotPlayedFor ~= player then
 			self.spotPlayedFor = player
 			self._spottedAnimPlaying = true
@@ -583,7 +583,8 @@ function MonsterBrain:_tick(dt: number)
 	end
 
 	-- During the Spotted freeze: only rotate toward the target, then return.
-	-- Movement is skipped, but lostTimer continues to tick in _processSensors.
+	-- Movement is skipped, and the lostTimer is strictly paused in _processSensors
+	-- to ensure the monster begins the chase with a full timer.
 	if self._spottedAnimPlaying then
 		if self.chaseTarget and self.chaseTarget.Character then
 			local tHRP = self.chaseTarget.Character:FindFirstChild("HumanoidRootPart")
