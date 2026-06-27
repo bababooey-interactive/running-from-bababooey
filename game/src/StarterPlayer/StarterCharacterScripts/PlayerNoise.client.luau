@@ -1,6 +1,8 @@
--- =============================================================
---  PlayerNoise.client.luau (in StarterCharacterScripts)
--- =============================================================
+-- PlayerNoise.client.luau
+-- StarterCharacterScripts
+--
+-- Sends walking noise events to the server so MonsterBrain can hear the player.
+-- Also drives local SFX (footsteps, breathing, heartbeat) based on monster awareness.
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,12 +10,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local character = script.Parent
 local hrp = character:WaitForChild("HumanoidRootPart")
 
--- ── SETUP AUDIO ──
-local function addSound(name, id, isLooped)
+-- ── Sound setup ────────────────────────────────────────────────
+local function addSound(name: string, id: string, looped: boolean)
 	local s = Instance.new("Sound")
 	s.Name = name
 	s.SoundId = id
-	s.Looped = isLooped
+	s.Looped = looped
 	s.Parent = hrp
 end
 
@@ -21,13 +23,15 @@ addSound("FootstepWalk", "rbxassetid://5446226292", true)
 addSound("BreathingFast", "rbxassetid://94952921557556", true)
 addSound("Heartbeat", "rbxassetid://139481207162657", true)
 
--- ── NOISE SENDER ──
+-- ── Noise constants ────────────────────────────────────────────
+local WALK_SPEED = 1 -- minimum horizontal speed (studs/s) to count as walking
+local WALK_NOISE = 0.3 -- noise level sent to server while walking
+local SEND_INTERVAL = 0.35 -- seconds between noise events
+
+-- ── Noise sender ───────────────────────────────────────────────
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MakeNoise = Remotes:WaitForChild("PlayerMakeNoise")
 
-local WALK_SPEED = 1
-local WALK_NOISE = 0.3
-local SEND_INTERVAL = 0.35
 local lastSent = 0
 
 RunService.Heartbeat:Connect(function()
@@ -45,16 +49,17 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
--- ── LOCAL PLAYER SFX ──
+-- ── Local SFX ──────────────────────────────────────────────────
 local sfx = {
 	walk = hrp:FindFirstChild("FootstepWalk"),
 	breath = hrp:FindFirstChild("BreathingFast"),
 	heartbeat = hrp:FindFirstChild("Heartbeat"),
 }
 
+-- Updated by AwarenessUpdated (non-nil first arg = full awareness broadcast)
 local currentAwareness = 0
-local AwarenessUpdated = Remotes:WaitForChild("AwarenessUpdated")
-AwarenessUpdated.OnClientEvent:Connect(function(awareness: number)
+
+Remotes:WaitForChild("AwarenessUpdated").OnClientEvent:Connect(function(awareness: number)
 	if awareness ~= nil then
 		currentAwareness = awareness
 	end
@@ -64,7 +69,7 @@ RunService.Heartbeat:Connect(function()
 	local vel = hrp.AssemblyLinearVelocity
 	local speed = Vector2.new(vel.X, vel.Z).Magnitude
 
-	-- 1. FOOTSTEPS
+	-- Footsteps: play while moving
 	if sfx.walk then
 		if speed >= WALK_SPEED then
 			if not sfx.walk.IsPlaying then
@@ -77,7 +82,7 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- 2. BREATHING
+	-- Breathing: audible when monster is very close (awareness ≥ 0.8)
 	if sfx.breath then
 		if currentAwareness >= 0.8 then
 			if not sfx.breath.IsPlaying then
@@ -91,14 +96,14 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- 3. HEARTBEAT
+	-- Heartbeat: audible above 0.4, speed and volume scale with awareness
 	if sfx.heartbeat then
 		if currentAwareness >= 0.4 then
 			if not sfx.heartbeat.IsPlaying then
 				sfx.heartbeat:Play()
 			end
 			sfx.heartbeat.Volume = currentAwareness
-			sfx.heartbeat.PlaybackSpeed = 1 + (currentAwareness * 0.5)
+			sfx.heartbeat.PlaybackSpeed = 1 + currentAwareness * 0.5
 		else
 			if sfx.heartbeat.IsPlaying then
 				sfx.heartbeat:Stop()

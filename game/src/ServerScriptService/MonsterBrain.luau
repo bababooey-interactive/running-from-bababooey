@@ -1,24 +1,16 @@
--- =============================================================
---  MonsterBrain.luau  (ModuleScript)
---  Shared AI brain used by MonsterAI.server.luau (original) and
---  DuplicationSystem.luau (clones).
+-- MonsterBrain.luau  (ModuleScript)
+-- ServerScriptService
 --
---  Path: game/src/ServerScriptService/MonsterBrain.luau
+-- Shared AI brain used by both MonsterAI (original) and DuplicationSystem (clones).
+-- Each instance runs its own Heartbeat loop and manages one monster model.
 --
---  CHANGES:
---  • Escape window is now much more forgiving:
---      - CHASE_LOST_TIME reduced 4 → 2.5 s
---      - Chase-duration lostTimer extension halved (×0.15, cap 2 s)
---      - Smell/hearing no longer meaningfully top up lostTimer while
---        the target isn't seen — smell gives 20 % restore (was 80 %),
---        hearing gives 15 % restore (was 40 %)
---      - INVESTIGATE_TIMEOUT reduced 6 → 3.5 s (monster gives up
---        searching sooner after losing the player)
---  • Monster freezes in place during the Spotted animation:
---      - _spottedAnimPlaying flag blocks _handleMovement
---      - lostTimer still ticks normally during the freeze so the
---        player gets a real head-start window before the chase moves
--- =============================================================
+-- State machine: IDLE → INVESTIGATE → SEARCH → CHASE → CATCH
+--
+-- Spotted-animation freeze:
+--   When a player is first seen the monster locks in place to play the Spotted
+--   animation. Movement is blocked via _spottedAnimPlaying, but lostTimer still
+--   ticks down normally — so breaking line-of-sight during the freeze gives the
+--   player a real escape window before the monster starts moving.
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -28,52 +20,65 @@ local Constants = require(game.ReplicatedStorage.Shared.Constants)
 local SensorSystem = require(script.Parent.SensorSystem)
 local SoundManager = require(script.Parent.SoundManager)
 
--- ─────────────────────────────────────────────
---  Constants shared by all instances
--- ─────────────────────────────────────────────
-local CHASE_LOST_TIME = 3 -- was 4: seconds before monster loses player when not sensed
-local INVESTIGATE_TIMEOUT = 4.5 -- was 6: seconds monster spends searching last known pos
+-- ── Tuning ────────────────────────────────────────────────────
+local CHASE_LOST_TIME = 3.0 -- seconds before the monster gives up a chase
+local INVESTIGATE_TIMEOUT = 4.5 -- seconds spent searching a last-known position
 local INVESTIGATE_SPEED_MUL = 0.7
 local DISTRACTION_THRESHOLD = 0.4
-local SMELL_CHASE_DIST = 8
-local IDLE_RANGE = 5 -- tiles
-local SEARCH_WANDER_DURATION = 4
-local SENSOR_INT = 0.25
+local SMELL_CHASE_DIST = 8 -- studs: smell triggers a chase below this distance
+local IDLE_RANGE = 5 -- tile radius for idle wandering
+local SEARCH_WANDER_DURATION = 4 -- seconds spent searching after a lost chase
+local SENSOR_INT = 0.25 -- seconds between sense checks
 local SUSPICION_DECAY_RATE = 0.12
 local SUSPICION_CHASE_THRESHOLD = 0.7
 local BROADCAST_INTERVAL = 0.5
 
--- Escape-window tuning
--- lostTimer top-ups when player is sensed indirectly (smell/hearing)
--- but NOT seen. Keeping these low lets the player break line-of-sight
--- and actually escape rather than having the monster perpetually refresh.
-local SMELL_LOST_TIMER_RESTORE = 0.60 -- fraction of effectiveLost restored by smell  (was 0.80)
-local HEAR_LOST_TIMER_RESTORE = 0.3 -- fraction of effectiveLost restored by hearing (was 0.40)
+-- lostTimer top-up fractions when the target is sensed indirectly.
+-- Keeping these well below 1.0 means breaking LoS actually lets you escape.
+local SMELL_LOST_TIMER_RESTORE = 0.60
+local HEAR_LOST_TIMER_RESTORE = 0.30
 
--- Chase-duration extension cap (makes long chases not last forever)
-local CHASE_DURATION_MUL = 0.23 -- was 0.30
-local CHASE_DURATION_CAP = 3.0 -- was 4.0
+-- Long chases extend the initial lostTimer slightly, but are capped.
+local CHASE_DURATION_MUL = 0.23
+local CHASE_DURATION_CAP = 3.0
+
+-- ── Animation IDs ─────────────────────────────────────────────
+local ANIM_IDS = {
+	Walk = "rbxassetid://90825719838414",
+	Run = "rbxassetid://75452347275172",
+	Spotted = "rbxassetid://91571146490557",
+	Jumpscare = "rbxassetid://79583022426609",
+}
+
+-- ─────────────────────────────────────────────────────────────
+--  MonsterBrain
+-- ─────────────────────────────────────────────────────────────
 
 local MonsterBrain = {}
 MonsterBrain.__index = MonsterBrain
 
--- ─────────────────────────────────────────────
---  Constructor
--- ─────────────────────────────────────────────
+-- config fields (all optional):
+--   monsterY      number   — Y position the monster is locked to
+--   monsterIndex  number   — index sent in broadcast (1 = original)
+--   graceTime     number   — seconds of immunity before AI activates
+--   onDied        function — called with (playerName) when a player is caught
+--   onBroadcast   function — called with (pos, stateStr, index) on broadcast tick
+--   speed         number   — override chase speed (defaults to Constants value)
+
 function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]: any }?)
-	config = config or {}
+	local cfg = config or {}
 
 	local self = setmetatable({}, MonsterBrain)
 
 	self.monster = monster
 	self.rules = rules
-	self.monsterY = config.monsterY or 0
-	self.monsterIndex = config.monsterIndex or 1
-	self.graceTime = config.graceTime or 0
-	self.onDied = config.onDied
-	self.onBroadcast = config.onBroadcast
+	self.monsterY = cfg.monsterY or 0
+	self.monsterIndex = cfg.monsterIndex or 1
+	self.graceTime = cfg.graceTime or 0
+	self.onDied = cfg.onDied
+	self.onBroadcast = cfg.onBroadcast
 
-	self.chaseSpeed = config.speed
+	self.chaseSpeed = cfg.speed
 		or math.min(Constants.MONSTER_SPEED_BASE + Constants.MONSTER_SPEED_PER_LEVEL, Constants.MONSTER_SPEED_MAX)
 
 	self.rootPart = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("rb") or monster.PrimaryPart
@@ -82,10 +87,10 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	monster.PrimaryPart = self.rootPart
 
 	self.sounds = SoundManager.new(monster)
-
 	self.tracks = {}
 	self:_loadAnimations()
 
+	-- State
 	self.state = "IDLE"
 	self.chaseTarget = nil
 	self.lostTimer = 0
@@ -101,7 +106,8 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	self.lastSensedPlayers = {}
 	self.currentMovement = ""
 
-	-- NEW: blocks _handleMovement while the Spotted anim plays
+	-- Blocks _handleMovement while the Spotted animation plays.
+	-- lostTimer still ticks during this time so escaping is possible.
 	self._spottedAnimPlaying = false
 
 	self._connection = nil
@@ -114,17 +120,17 @@ function MonsterBrain.new(monster: Model, rules: { string }, config: { [string]:
 	return self
 end
 
--- ─────────────────────────────────────────────
---  Public: set the walkable grid from MapGenerator
--- ─────────────────────────────────────────────
+-- ── Public API ────────────────────────────────────────────────
+
 function MonsterBrain:setGrid(grid: { { number } })
 	self._grid = grid
 	self._gridReady = true
 end
 
--- ─────────────────────────────────────────────
---  Public: start the AI loop
--- ─────────────────────────────────────────────
+function MonsterBrain:setRules(rules: { string })
+	self.rules = rules
+end
+
 function MonsterBrain:start()
 	if self._graceActive then
 		task.delay(self.graceTime, function()
@@ -139,9 +145,6 @@ function MonsterBrain:start()
 	end)
 end
 
--- ─────────────────────────────────────────────
---  Public: stop the AI loop
--- ─────────────────────────────────────────────
 function MonsterBrain:stop()
 	if self._connection then
 		self._connection:Disconnect()
@@ -149,22 +152,7 @@ function MonsterBrain:stop()
 	end
 end
 
--- ─────────────────────────────────────────────
---  Public: update active rules mid-session
--- ─────────────────────────────────────────────
-function MonsterBrain:setRules(rules: { string })
-	self.rules = rules
-end
-
--- ─────────────────────────────────────────────
---  Animation helpers
--- ─────────────────────────────────────────────
-local ANIM_IDS = {
-	Walk = "rbxassetid://90825719838414",
-	Run = "rbxassetid://75452347275172",
-	Spotted = "rbxassetid://91571146490557",
-	Jumpscare = "rbxassetid://79583022426609",
-}
+-- ── Animation helpers ─────────────────────────────────────────
 
 function MonsterBrain:_loadAnimations()
 	local humanoid = self.monster:FindFirstChildOfClass("Humanoid")
@@ -211,9 +199,8 @@ function MonsterBrain:_playAction(name: string)
 	end
 end
 
--- ─────────────────────────────────────────────
---  Grid helpers
--- ─────────────────────────────────────────────
+-- ── Grid helpers ──────────────────────────────────────────────
+
 function MonsterBrain:_tileToWorld(col: number, row: number): Vector3
 	return Vector3.new((col - 1) * Constants.TILE_SIZE, self.monsterY, (row - 1) * Constants.TILE_SIZE)
 end
@@ -244,11 +231,7 @@ function MonsterBrain:_clampToMap(pos: Vector3): Vector3
 	local ROWS = #g
 	local COLS = g[1] and #g[1] or ROWS
 	local m = Constants.TILE_SIZE
-	return Vector3.new(
-		math.clamp(pos.X, m, (COLS - 1) * Constants.TILE_SIZE - m),
-		pos.Y,
-		math.clamp(pos.Z, m, (ROWS - 1) * Constants.TILE_SIZE - m)
-	)
+	return Vector3.new(math.clamp(pos.X, m, (COLS - 1) * m - m), pos.Y, math.clamp(pos.Z, m, (ROWS - 1) * m - m))
 end
 
 function MonsterBrain:_pickIdleTarget(): Vector3
@@ -263,44 +246,45 @@ function MonsterBrain:_pickIdleTarget(): Vector3
 	return self:_tileToWorld(col, row)
 end
 
--- ─────────────────────────────────────────────
---  Movement
--- ─────────────────────────────────────────────
+-- ── Movement ──────────────────────────────────────────────────
+
 function MonsterBrain:_stepToward(target: Vector3, speed: number, dt: number): boolean
 	local pivot = self.monster:GetPivot()
 	local flat = Vector3.new(target.X, pivot.Position.Y, target.Z)
 	local dir = flat - pivot.Position
 	local dist = dir.Magnitude
+
 	if dist < 0.6 then
 		return true
 	end
 
 	local step = math.min(speed * dt, dist)
-	local newPos = pivot.Position + dir.Unit * step
-	newPos = self:_clampToMap(newPos)
+	local newPos = self:_clampToMap(pivot.Position + dir.Unit * step)
 
-	local targetRot = CFrame.lookAt(newPos, newPos + dir.Unit)
 	local turnSpeed = self.state == "CHASE" and 14 or 6
+	local targetRot = CFrame.lookAt(newPos, newPos + dir.Unit)
 	local smoothed = pivot:Lerp(targetRot, dt * turnSpeed)
 	self.monster:PivotTo(CFrame.new(newPos) * smoothed.Rotation)
 	return false
 end
 
--- ─────────────────────────────────────────────
---  Tentacle attack visual
--- ─────────────────────────────────────────────
+-- ── Tentacle attack visual ────────────────────────────────────
+
 function MonsterBrain:_shootTentacles(targetPos: Vector3, extendTime: number)
 	local limbs = {
 		self.monster:FindFirstChild("LeftHand", true) or self.monster:FindFirstChild("Left Arm", true),
 		self.monster:FindFirstChild("RightHand", true) or self.monster:FindFirstChild("Right Arm", true),
 	}
+
 	local active = {}
 	for _, limb in ipairs(limbs) do
 		if not limb then
 			continue
 		end
+
 		local att0 = Instance.new("Attachment")
 		att0.Parent = limb
+
 		local endPart = Instance.new("Part")
 		endPart.Size = Vector3.new(0.1, 0.1, 0.1)
 		endPart.Transparency = 1
@@ -308,8 +292,10 @@ function MonsterBrain:_shootTentacles(targetPos: Vector3, extendTime: number)
 		endPart.CanCollide = false
 		endPart.Position = limb.Position + self.rootPart.CFrame.LookVector
 		endPart.Parent = workspace
+
 		local att1 = Instance.new("Attachment")
 		att1.Parent = endPart
+
 		local beam = Instance.new("Beam")
 		beam.Attachment0 = att0
 		beam.Attachment1 = att1
@@ -321,33 +307,36 @@ function MonsterBrain:_shootTentacles(targetPos: Vector3, extendTime: number)
 		beam.CurveSize0 = math.random(-4, 4)
 		beam.CurveSize1 = math.random(-4, 4)
 		beam.Parent = endPart
-		table.insert(active, { part = endPart, limb = limb })
+
 		TweenService:Create(
 			endPart,
 			TweenInfo.new(extendTime, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
 			{ Position = targetPos }
 		):Play()
+
+		table.insert(active, { part = endPart, limb = limb })
 	end
+
 	task.delay(extendTime + 0.8, function()
 		for _, t in ipairs(active) do
-			if t.part and t.limb then
-				local r = TweenService:Create(
-					t.part,
-					TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
-					{ Position = t.limb.Position }
-				)
-				r:Play()
-				r.Completed:Once(function()
-					t.part:Destroy()
-				end)
+			if not (t.part and t.part.Parent and t.limb and t.limb.Parent) then
+				continue
 			end
+			local retract = TweenService:Create(
+				t.part,
+				TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+				{ Position = t.limb.Position }
+			)
+			retract:Play()
+			retract.Completed:Once(function()
+				t.part:Destroy()
+			end)
 		end
 	end)
 end
 
--- ─────────────────────────────────────────────
---  State transitions
--- ─────────────────────────────────────────────
+-- ── State transitions ─────────────────────────────────────────
+
 function MonsterBrain:_beginIdle()
 	self.state = "IDLE"
 	self.chaseTarget = nil
@@ -368,9 +357,9 @@ function MonsterBrain:_beginChase(player: Player)
 		self.chaseTarget = player
 		self:_playMovement("Run")
 
-		-- ── Spotted animation: freeze the monster while it plays ──
-		-- The lostTimer still ticks down during the freeze, giving the
-		-- player a real head-start window before the monster moves.
+		-- Play the Spotted animation and freeze movement until it finishes.
+		-- lostTimer ticks normally during the freeze so the player can escape
+		-- by breaking line-of-sight before the monster starts moving.
 		if self.spotPlayedFor ~= player then
 			self.spotPlayedFor = player
 			self._spottedAnimPlaying = true
@@ -378,13 +367,9 @@ function MonsterBrain:_beginChase(player: Player)
 			task.spawn(function()
 				task.wait(0.05)
 				self:_playAction("Spotted")
-
-				-- Wait for the animation to finish then release movement.
-				-- Use a Stopped signal if the track loaded; fall back to a
-				-- fixed delay (1.2 s) if something went wrong loading it.
-				local spottedTrack = self.tracks["Spotted"]
-				if spottedTrack then
-					spottedTrack.Stopped:Wait()
+				local track = self.tracks["Spotted"]
+				if track then
+					track.Stopped:Wait()
 				else
 					task.wait(1.2)
 				end
@@ -417,9 +402,8 @@ function MonsterBrain:_beginInvestigate(position: Vector3)
 	self.sounds:onStateChange("IDLE", false)
 end
 
--- ─────────────────────────────────────────────
---  Catch (strike)
--- ─────────────────────────────────────────────
+-- ── Catch (strike sequence) ───────────────────────────────────
+
 function MonsterBrain:_beginStrike(player: Player)
 	self.state = "CATCH"
 	self.sounds:onStateChange("CATCH", false)
@@ -455,11 +439,12 @@ function MonsterBrain:_beginStrike(player: Player)
 	self:_shootTentacles(snapPos + Vector3.new(0, 1, 0), STRIKE_TIME)
 
 	task.delay(STRIKE_TIME, function()
-		if not player.Character then
+		local liveChar = player.Character
+		if not liveChar then
 			self:_beginIdle()
 			return
 		end
-		local liveHRP = player.Character:FindFirstChild("HumanoidRootPart")
+		local liveHRP = liveChar:FindFirstChild("HumanoidRootPart")
 		if not liveHRP then
 			self:_beginIdle()
 			return
@@ -467,7 +452,7 @@ function MonsterBrain:_beginStrike(player: Player)
 
 		if (liveHRP.Position - snapPos).Magnitude <= 4 then
 			self.sounds:playHitSounds()
-			local hum = player.Character:FindFirstChildOfClass("Humanoid")
+			local hum = liveChar:FindFirstChildOfClass("Humanoid")
 			if hum then
 				hum.Health = 0
 			end
@@ -478,6 +463,7 @@ function MonsterBrain:_beginStrike(player: Player)
 				self:_beginIdle()
 			end)
 		else
+			-- Player escaped the strike window — resume chase
 			task.delay(1.2, function()
 				if self.state == "CATCH" then
 					self:_beginChase(player)
@@ -487,14 +473,15 @@ function MonsterBrain:_beginStrike(player: Player)
 	end)
 end
 
--- ─────────────────────────────────────────────
---  Main tick (called every frame)
--- ─────────────────────────────────────────────
+-- ── Main tick ─────────────────────────────────────────────────
+
 function MonsterBrain:_tick(dt: number)
 	if not self._gridReady then
 		return
 	end
+
 	if self._graceActive then
+		-- Broadcast idle position during grace so the minimap shows the monster
 		self._broadcastCD = math.max(0, self._broadcastCD - dt)
 		if self._broadcastCD <= 0 then
 			self._broadcastCD = BROADCAST_INTERVAL
@@ -510,15 +497,16 @@ function MonsterBrain:_tick(dt: number)
 
 	local monPos = self.rootPart.Position
 
-	-- ── Sensor tick ───────────────────────────────────────────
+	-- Sense check (throttled)
 	if self._sensorCD >= SENSOR_INT and self.state ~= "CATCH" then
 		self._sensorCD = 0
+
 		local all = Players:GetPlayers()
 		local heard = SensorSystem.CheckHearing(monPos, self.rules)
 		local smelled = SensorSystem.CheckSmell(monPos, all, self.rules)
 		local seen = SensorSystem.CheckVision(self.monster, monPos, all, self.rules)
 
-		-- Vision: immediate chase
+		-- Vision gives immediate, full-confidence detection
 		if seen then
 			local seenHRP = seen.Character and seen.Character:FindFirstChild("HumanoidRootPart")
 			if seenHRP then
@@ -528,25 +516,25 @@ function MonsterBrain:_tick(dt: number)
 			self:_beginChase(seen)
 		end
 
-		-- Build suspicion from hearing
+		-- Hearing raises suspicion
 		if heard and heard.player then
 			local gain = heard.level * 0.35
 			self.suspicion[heard.player] = math.min((self.suspicion[heard.player] or 0) + gain, 1.0)
 			self.lastKnownPos = heard.position
 		end
 
-		-- Build suspicion from smell
+		-- Smell raises suspicion
 		if smelled then
 			local smellHRP = smelled.Character and smelled.Character:FindFirstChild("HumanoidRootPart")
 			if smellHRP then
 				local smellDist = (monPos - smellHRP.Position).Magnitude
-				local smellFactor = 1 - (smellDist / Constants.MONSTER_SMELL_RADIUS)
+				local smellFactor = 1 - smellDist / Constants.MONSTER_SMELL_RADIUS
 				self.suspicion[smelled] = math.min((self.suspicion[smelled] or 0) + smellFactor * 0.25, 1.0)
 				self.lastKnownPos = smellHRP.Position
 			end
 		end
 
-		-- Track who we're currently sensing (for decay)
+		-- Track who is currently sensed (used by decay logic below)
 		self.lastSensedPlayers = {}
 		if seen then
 			self.lastSensedPlayers[seen] = true
@@ -558,7 +546,7 @@ function MonsterBrain:_tick(dt: number)
 			self.lastSensedPlayers[heard.player] = true
 		end
 
-		-- Find highest-suspicion player above chase threshold
+		-- Escalate to chase if any player's suspicion exceeds the threshold
 		local highestPlayer, highestLevel = nil, 0
 		for p, level in pairs(self.suspicion) do
 			if level >= SUSPICION_CHASE_THRESHOLD and level > highestLevel then
@@ -570,7 +558,7 @@ function MonsterBrain:_tick(dt: number)
 		self:_processSensors(seen, heard, smelled, highestPlayer)
 	end
 
-	-- ── Suspicion decay ───────────────────────────────────────
+	-- Suspicion decay for players not currently sensed
 	if self.state ~= "CATCH" then
 		for p, level in pairs(self.suspicion) do
 			if not self.lastSensedPlayers[p] then
@@ -583,10 +571,10 @@ function MonsterBrain:_tick(dt: number)
 	end
 
 	if self.state == "CHASE" then
-		self.chaseDuration = self.chaseDuration + dt
+		self.chaseDuration += dt
 	end
 
-	-- ── Broadcast ─────────────────────────────────────────────
+	-- Broadcast position/state to clients
 	if self._broadcastCD <= 0 then
 		self._broadcastCD = BROADCAST_INTERVAL
 		if self.onBroadcast then
@@ -594,18 +582,17 @@ function MonsterBrain:_tick(dt: number)
 		end
 	end
 
-	-- ── Movement — skip entirely while Spotted anim plays ─────
+	-- During the Spotted freeze: only rotate toward the target, then return.
+	-- Movement is skipped, but lostTimer continues to tick in _processSensors.
 	if self._spottedAnimPlaying then
-		-- Rotate to face the spotted player in place during the animation
 		if self.chaseTarget and self.chaseTarget.Character then
 			local tHRP = self.chaseTarget.Character:FindFirstChild("HumanoidRootPart")
 			if tHRP then
 				local pivot = self.monster:GetPivot()
-				local flat = Vector3.new(tHRP.Position.X, pivot.Position.Y, tHRP.Position.Z)
-				local dir = flat - pivot.Position
+				local dir = Vector3.new(tHRP.Position.X, pivot.Position.Y, tHRP.Position.Z) - pivot.Position
 				if dir.Magnitude > 0.1 then
-					local targetRot = CFrame.lookAt(pivot.Position, pivot.Position + dir.Unit)
-					local smoothed = pivot:Lerp(targetRot, dt * 10)
+					local rot = CFrame.lookAt(pivot.Position, pivot.Position + dir.Unit)
+					local smoothed = pivot:Lerp(rot, dt * 10)
 					self.monster:PivotTo(CFrame.new(pivot.Position) * smoothed.Rotation)
 				end
 			end
@@ -616,9 +603,8 @@ function MonsterBrain:_tick(dt: number)
 	self:_handleMovement(dt, monPos)
 end
 
--- ─────────────────────────────────────────────
---  Sensor state logic (split out to keep _tick readable)
--- ─────────────────────────────────────────────
+-- ── Sensor state logic ────────────────────────────────────────
+
 function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 	local st = self.state
 
@@ -655,6 +641,7 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 				end
 			end
 		end
+		-- Redirect investigation toward louder nearby noise
 		if not seen and heard and heard.level > 0.3 and self.investigatePos then
 			local nd = (self.rootPart.Position - heard.position).Magnitude
 			local cd = (self.rootPart.Position - self.investigatePos).Magnitude
@@ -663,7 +650,7 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 				self.investigateTimer = INVESTIGATE_TIMEOUT
 			end
 		end
-		self.investigateTimer = self.investigateTimer - SENSOR_INT
+		self.investigateTimer -= SENSOR_INT
 		if self.investigateTimer <= 0 then
 			self:_beginIdle()
 		end
@@ -688,27 +675,27 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 		local effectiveLost = CHASE_LOST_TIME + math.min(self.chaseDuration * CHASE_DURATION_MUL, CHASE_DURATION_CAP)
 
 		if seen then
-			-- Direct line of sight: fully refresh the timer
+			-- Direct sight: fully refresh the timer
 			self.lostTimer = effectiveLost
 		elseif smelled then
-			-- Smell: only a small top-up so breaking LoS still helps a lot
+			-- Smell: partial top-up; proximity amplifies it
 			local smellHRP = smelled.Character and smelled.Character:FindFirstChild("HumanoidRootPart")
 			if smellHRP then
-				local d = (self.rootPart.Position - smellHRP.Position).Magnitude
-				local proximity = 1 - (d / Constants.MONSTER_SMELL_RADIUS)
+				local proximity = 1
+					- (self.rootPart.Position - smellHRP.Position).Magnitude / Constants.MONSTER_SMELL_RADIUS
 				self.lostTimer = math.max(self.lostTimer, effectiveLost * SMELL_LOST_TIMER_RESTORE * proximity)
 			end
 		elseif heard and heard.player == self.chaseTarget then
-			-- Hearing the chase target: tiny top-up
+			-- Hearing the chase target: small top-up
 			self.lostTimer = math.max(self.lostTimer, effectiveLost * HEAR_LOST_TIMER_RESTORE)
 		else
-			-- No sensor input: count down normally
+			-- No sensor input — tick down only when not locked in Spotted freeze.
 			if not self._spottedAnimPlaying then
-				self.lostTimer = self.lostTimer - SENSOR_INT
+				self.lostTimer -= SENSOR_INT
 			end
 		end
 
-		-- Distraction by anonymous world noise
+		-- Anonymous world noise (lever, boulder, etc.) can break a chase
 		if not seen and heard and heard.player == nil then
 			local dist = (self.rootPart.Position - heard.position).Magnitude
 			local hr = Constants.MONSTER_HEAR_RADIUS
@@ -716,7 +703,7 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 				local score = heard.level * (1 - dist / hr)
 				local threshold = DISTRACTION_THRESHOLD + math.min(self.chaseDuration * 0.04, 0.35)
 				if smelled then
-					threshold = threshold * 1.5
+					threshold *= 1.5
 				end
 				if score >= threshold then
 					self.postChaseSearchPos = self.lastKnownPos
@@ -736,9 +723,8 @@ function MonsterBrain:_processSensors(seen, heard, smelled, highestPlayer)
 	end
 end
 
--- ─────────────────────────────────────────────
---  Movement handler
--- ─────────────────────────────────────────────
+-- ── Movement handler ──────────────────────────────────────────
+
 function MonsterBrain:_handleMovement(dt: number, monPos: Vector3)
 	local st = self.state
 
@@ -751,8 +737,7 @@ function MonsterBrain:_handleMovement(dt: number, monPos: Vector3)
 			self.idleTarget = nil
 		end
 	elseif st == "INVESTIGATE" and self.investigatePos then
-		local speed = Constants.MONSTER_SPEED_BASE * INVESTIGATE_SPEED_MUL
-		if self:_stepToward(self.investigatePos, speed, dt) then
+		if self:_stepToward(self.investigatePos, Constants.MONSTER_SPEED_BASE * INVESTIGATE_SPEED_MUL, dt) then
 			if self.postChaseSearchPos then
 				self.state = "SEARCH"
 				self.searchWanderTimer = SEARCH_WANDER_DURATION
@@ -762,11 +747,12 @@ function MonsterBrain:_handleMovement(dt: number, monPos: Vector3)
 			end
 		end
 	elseif st == "SEARCH" then
-		self.searchWanderTimer = self.searchWanderTimer - dt
+		self.searchWanderTimer -= dt
 		if self.searchWanderTimer <= 0 then
 			self:_beginIdle()
 			return
 		end
+
 		if not self.idleTarget then
 			local center = self.postChaseSearchPos or monPos
 			local col, row = self:_worldToTile(center)
@@ -814,7 +800,7 @@ function MonsterBrain:_handleMovement(dt: number, monPos: Vector3)
 
 		local catchR = Constants.MONSTER_REACH_BASE
 		if table.find(self.rules, Constants.Rules.MONSTER_REACH) then
-			catchR = catchR + Constants.MONSTER_REACH_BONUS
+			catchR += Constants.MONSTER_REACH_BONUS
 		end
 
 		local flatMon = Vector3.new(monPos.X, 0, monPos.Z)

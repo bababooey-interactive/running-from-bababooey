@@ -1,6 +1,14 @@
 -- AwarenessMeter.client.luau
--- Place inside StarterPlayerScripts
--- Redesigned to match SurvivalUI style, positioned at bottom-right
+-- StarterPlayerScripts
+--
+-- Bottom-right HUD bars showing the player's current noise level and
+-- how much ambient light they are standing in.
+--
+-- Noise sources:
+--   • Walking (computed locally each frame)
+--   • World events: lever pulls, drops, etc. (pushed from SensorSystem via
+--     AwarenessUpdated with a nil first argument)
+-- Light: sampled every frame from all tagged MapLights in range.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,15 +18,18 @@ local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local RE_Noise = Remotes:WaitForChild("AwarenessUpdated")
+local RE_Awareness = Remotes:WaitForChild("AwarenessUpdated")
+
+-- ── Config ─────────────────────────────────────────────────────
+local WALK_SPEED = 1 -- studs/s threshold for walking noise
+local WALK_NOISE = 0.3 -- noise level injected while walking
+local NOISE_LIFETIME = 1.2 -- seconds until noise fully decays
+local DECAY_RATE = 1 / NOISE_LIFETIME
 
 -- ── Color palette (matches SurvivalUI) ────────────────────────
 local C = {
-	BG_DARK = Color3.fromRGB(14, 14, 18),
 	BAR_BG = Color3.fromRGB(35, 35, 42),
-	BORDER = Color3.fromRGB(60, 60, 75),
 	TEXT_WHITE = Color3.fromRGB(235, 235, 235),
-	TEXT_DIM = Color3.fromRGB(150, 150, 160),
 }
 
 -- ── Build ScreenGui ───────────────────────────────────────────
@@ -28,7 +39,6 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = player.PlayerGui
 
--- Container at bottom-right (mirrors SurvivalUI's bottom-left bars)
 local barsFrame = Instance.new("Frame")
 barsFrame.Name = "AwarenessBars"
 barsFrame.AnchorPoint = Vector2.new(1, 1)
@@ -37,24 +47,23 @@ barsFrame.Size = UDim2.new(0, 200, 0, 56)
 barsFrame.BackgroundTransparency = 1
 barsFrame.Parent = gui
 
-local barsLayout = Instance.new("UIListLayout")
-barsLayout.FillDirection = Enum.FillDirection.Vertical
-barsLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-barsLayout.Padding = UDim.new(0, 5)
-barsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-barsLayout.Parent = barsFrame
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Vertical
+layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+layout.Padding = UDim.new(0, 5)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = barsFrame
 
--- ── Bar builder (matches SurvivalUI bar style) ─────────────────
-local function makeBar(icon, barColor, layoutOrder, name)
+-- ── Bar factory ───────────────────────────────────────────────
+local function makeBar(icon: string, barColor: Color3, order: number, name: string)
 	local row = Instance.new("Frame")
 	row.Name = name
 	row.Size = UDim2.new(1, 0, 0, 22)
 	row.BackgroundTransparency = 1
-	row.LayoutOrder = layoutOrder
+	row.LayoutOrder = order
 	row.Parent = barsFrame
 
 	local iconLabel = Instance.new("TextLabel")
-	iconLabel.Name = "Icon"
 	iconLabel.Size = UDim2.new(0, 20, 1, 0)
 	iconLabel.BackgroundTransparency = 1
 	iconLabel.TextColor3 = barColor
@@ -64,70 +73,55 @@ local function makeBar(icon, barColor, layoutOrder, name)
 	iconLabel.TextYAlignment = Enum.TextYAlignment.Center
 	iconLabel.Parent = row
 
-	local trackBg = Instance.new("Frame")
-	trackBg.Name = "Track"
-	trackBg.Position = UDim2.new(0, 24, 0.5, -7)
-	trackBg.Size = UDim2.new(1, -24, 0, 14)
-	trackBg.BackgroundColor3 = C.BAR_BG
-	trackBg.BorderSizePixel = 0
-	trackBg.Parent = row
-
-	local trackCorner = Instance.new("UICorner")
-	trackCorner.CornerRadius = UDim.new(0, 4)
-	trackCorner.Parent = trackBg
+	local track = Instance.new("Frame")
+	track.Name = "Track"
+	track.Position = UDim2.new(0, 24, 0.5, -7)
+	track.Size = UDim2.new(1, -24, 0, 14)
+	track.BackgroundColor3 = C.BAR_BG
+	track.BorderSizePixel = 0
+	track.Parent = row
+	Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
 	fill.Size = UDim2.new(0, 0, 1, 0)
 	fill.BackgroundColor3 = barColor
 	fill.BorderSizePixel = 0
-	fill.Parent = trackBg
+	fill.Parent = track
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
 
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(0, 4)
-	fillCorner.Parent = fill
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = C.TEXT_WHITE
+	label.TextSize = 10
+	label.Font = Enum.Font.GothamBold
+	label.Text = ""
+	label.ZIndex = 2
+	label.Parent = track
 
-	local barText = Instance.new("TextLabel")
-	barText.Name = "BarText"
-	barText.Size = UDim2.new(1, 0, 1, 0)
-	barText.BackgroundTransparency = 1
-	barText.TextColor3 = C.TEXT_WHITE
-	barText.TextSize = 10
-	barText.Font = Enum.Font.GothamBold
-	barText.Text = ""
-	barText.ZIndex = 2
-	barText.Parent = trackBg
-
-	return row, fill, barText
+	return row, fill, label
 end
 
 local noiseRow, noiseFill, noiseText = makeBar("🔊", Color3.fromRGB(180, 120, 40), 1, "NoiseRow")
 local lightRow, lightFill, lightText = makeBar("💡", Color3.fromRGB(200, 160, 40), 2, "LightRow")
 
 -- ── Color helpers ─────────────────────────────────────────────
-local function noiseColor(t)
-	-- grey → amber → red
+local function noiseColor(t: number): Color3
 	if t < 0.5 then
-		return Color3.fromRGB(
-			math.round(180 + 55 * (t * 2)),
-			math.round(180 - 60 * (t * 2)),
-			math.round(180 - 130 * (t * 2))
-		)
+		local s = t * 2
+		return Color3.fromRGB(math.round(180 + 55 * s), math.round(180 - 60 * s), math.round(180 - 130 * s))
 	else
-		return Color3.fromRGB(
-			math.round(235),
-			math.round(120 - 80 * ((t - 0.5) * 2)),
-			math.round(50 - 30 * ((t - 0.5) * 2))
-		)
+		local s = (t - 0.5) * 2
+		return Color3.fromRGB(235, math.round(120 - 80 * s), math.round(50 - 30 * s))
 	end
 end
 
-local function lightColor(t)
-	-- grey → amber
-	return Color3.fromRGB(math.round(160 + 79 * t), math.round(160 - 1 * t), math.round(160 - 121 * t))
+local function lightColor(t: number): Color3
+	return Color3.fromRGB(math.round(160 + 79 * t), math.round(160 - t), math.round(160 - 121 * t))
 end
 
-local function setBar(fill, t)
+local function setBar(fill: Frame, t: number)
 	TweenService:Create(
 		fill,
 		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -135,22 +129,19 @@ local function setBar(fill, t)
 	):Play()
 end
 
--- ── Noise: local tracking and replication ─────────────────────
+-- ── State ──────────────────────────────────────────────────────
 local currentNoise = 0
 local currentLight = 0
-local NOISE_LIFETIME = 1.2
-local DECAY_RATE = 1 / NOISE_LIFETIME
 
-RE_Noise.OnClientEvent:Connect(function(_aw, noise)
-	-- If _aw is nil, this is a direct noise update from SensorSystem (e.g. lever pull, item drop).
-	-- If _aw is not nil, it's a monster AI awareness update, which we ignore for the noise bar.
-	if _aw == nil and noise then
+-- Receives world-noise pushes from SensorSystem (nil first arg = noise-only update)
+RE_Awareness.OnClientEvent:Connect(function(awareness, noise)
+	if awareness == nil and noise then
 		currentNoise = math.max(currentNoise, noise)
 	end
 end)
 
--- ── Light & Noise: checked locally every frame ────────────────
-RunService.Heartbeat:Connect(function(dt)
+-- ── Main loop — single Heartbeat for both bars ─────────────────
+RunService.Heartbeat:Connect(function(dt: number)
 	local char = player.Character
 	if not char then
 		return
@@ -160,51 +151,44 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
-	-- 1. Light detection
+	-- Light: sample all tagged map lights
 	local pos = hrp.Position
-	local maxContrib = 0
-
+	local maxLight = 0
 	for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
 		if light:IsA("PointLight") and light.Enabled then
 			local part = light.Parent
 			if part then
 				local dist = (pos - part.Position).Magnitude
 				if dist <= light.Range then
-					-- closer = brighter contribution
-					local contrib = 1 - (dist / light.Range)
-					if contrib > maxContrib then
-						maxContrib = contrib
+					local contrib = 1 - dist / light.Range
+					if contrib > maxLight then
+						maxLight = contrib
 					end
 				end
 			end
 		end
 	end
+	currentLight = maxLight
 
-	currentLight = maxContrib
-	lightFill.BackgroundColor3 = lightColor(maxContrib)
-	setBar(lightFill, maxContrib)
-	lightText.Text = maxContrib > 0.02 and string.format("%d%%", math.floor(maxContrib * 100)) or ""
-
-	-- 2. Noise local walking detection & decay
+	-- Noise: walking contribution + decay
 	local vel = hrp.AssemblyLinearVelocity
 	local speed = Vector2.new(vel.X, vel.Z).Magnitude
-
-	if speed >= 1 then -- WALK_SPEED is 1
-		currentNoise = math.max(currentNoise, 0.3) -- WALK_NOISE is 0.3
+	if speed >= WALK_SPEED then
+		currentNoise = math.max(currentNoise, WALK_NOISE)
 	end
+	currentNoise = math.max(0, currentNoise - DECAY_RATE * dt)
 
-	if currentNoise > 0 then
-		currentNoise = math.max(0, currentNoise - DECAY_RATE * dt)
-	end
+	-- Update bars
+	lightFill.BackgroundColor3 = lightColor(currentLight)
+	setBar(lightFill, currentLight)
+	lightText.Text = currentLight > 0.02 and string.format("%d%%", math.floor(currentLight * 100)) or ""
 
 	noiseFill.BackgroundColor3 = noiseColor(currentNoise)
 	setBar(noiseFill, currentNoise)
 	noiseText.Text = currentNoise > 0.02 and string.format("%d%%", math.floor(currentNoise * 100)) or ""
-end)
 
--- ── Hide when both bars are at 0 (keeps HUD clean) ────────────
-RunService.Heartbeat:Connect(function()
-	local anyActivity = currentNoise > 0.02 or currentLight > 0.02
-	noiseRow.Visible = anyActivity
-	lightRow.Visible = anyActivity
+	-- Hide both bars when there is nothing to show
+	local active = currentNoise > 0.02 or currentLight > 0.02
+	noiseRow.Visible = active
+	lightRow.Visible = active
 end)

@@ -1,9 +1,13 @@
--- =============================================================
---  MonsterAI.server.luau  (Script — thin orchestrator)
---  Sets up the original monster and delegates all AI to MonsterBrain.
---  Also handles: remotes, rules, map startup, reach visuals,
---  awareness broadcasts, and duplication via DuplicationSystem.
--- =============================================================
+-- MonsterAI.server.luau  (Script — thin orchestrator)
+-- ServerScriptService
+--
+-- Responsibilities:
+--   • Clone SoulDragger from ServerStorage and prepare it for simulation.
+--   • Create the primary MonsterBrain (index 1) and wire up its callbacks.
+--   • Apply visual effects for active rules (MONSTER_REACH arm aura).
+--   • Forward map data to brain and DuplicationSystem when MapGenerator fires.
+--   • Forward rules from GameManager's BindableEvent (+ SessionInfo fallback).
+--   • Relay noise events from clients to SensorSystem.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,7 +18,7 @@ local SensorSystem = require(script.Parent.SensorSystem)
 local MonsterBrain = require(script.Parent.MonsterBrain)
 local DuplicationSystem = require(script.Parent.DuplicationSystem)
 
--- ── Remote Events ─────────────────────────────────────────────
+-- ── Remotes ───────────────────────────────────────────────────
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE = {
 	PlayerMakeNoise = Remotes:WaitForChild("PlayerMakeNoise"),
@@ -24,7 +28,7 @@ local RE = {
 }
 DuplicationSystem.init(RE.PlayerDied)
 
--- ── Monster Setup ─────────────────────────────────────────────
+-- ── Monster setup ─────────────────────────────────────────────
 local monster = ServerStorage:WaitForChild("Characters"):WaitForChild("SoulDragger"):Clone()
 monster.Parent = workspace
 
@@ -40,14 +44,13 @@ end
 local MONSTER_Y = 0
 local GRACE_PERIOD = 8
 
--- ── Grid (set when map is generated) ──────────────────────────
-local grid = {}
-
--- ── Active Rules ─────────────────────────────────────────────
+-- ── State ─────────────────────────────────────────────────────
 local activeRules: { string } = {}
+local grid: { { number } } = {}
 
--- ── Create Brain ─────────────────────────────────────────────
-local brain = MonsterBrain.new(monster, activeRules, {
+-- ── Create primary brain ──────────────────────────────────────
+local brain
+brain = MonsterBrain.new(monster, activeRules, {
 	monsterY = MONSTER_Y,
 	monsterIndex = 1,
 	graceTime = GRACE_PERIOD,
@@ -60,10 +63,15 @@ local brain = MonsterBrain.new(monster, activeRules, {
 			state = stateStr,
 			monsterIndex = index,
 		})
-		-- Awareness update (original monster only)
+		-- Per-player awareness (original monster only; clones skip awareness)
 		for _, pl in ipairs(Players:GetPlayers()) do
 			local aw = SensorSystem.GetAwarenessForPlayer(
-				pos, monster, pl, activeRules, stateStr == "CHASE", brain.chaseTarget
+				pos,
+				monster,
+				pl,
+				activeRules,
+				stateStr == "CHASE",
+				brain.chaseTarget
 			)
 			local noise = SensorSystem.GetRecentNoiseForPlayer(pl)
 			RE.AwarenessUpdated:FireClient(pl, aw, noise)
@@ -71,7 +79,8 @@ local brain = MonsterBrain.new(monster, activeRules, {
 	end,
 })
 
--- ── Spawn in Arc ──────────────────────────────────────────────
+-- ── Arc spawn ─────────────────────────────────────────────────
+-- Places the monster on a walkable tile at a distance from the player spawn.
 
 local function spawnAtArc(playerSpawnWorld: Vector3, radiusTiles: number)
 	local TILE = Constants.TILE_SIZE
@@ -87,28 +96,24 @@ local function spawnAtArc(playerSpawnWorld: Vector3, radiusTiles: number)
 		local row = math.clamp(math.round(cRow + math.sin(angle) * r), 1, ROWS)
 		if grid[row] and grid[row][col] and grid[row][col] ~= 0 then
 			monster:PivotTo(CFrame.new(Vector3.new((col - 1) * TILE, MONSTER_Y, (row - 1) * TILE)))
-			print(("[MonsterAI] Spawned at tile (%d,%d)"):format(col, row))
+			print(("[MonsterAI] Spawned at tile (%d, %d)"):format(col, row))
 			return
 		end
 	end
-	-- Fallback: opposite side of spawn
-	local fb = Vector3.new(playerSpawnWorld.X + radiusTiles * TILE, MONSTER_Y, playerSpawnWorld.Z)
-	monster:PivotTo(CFrame.new(fb))
-	warn("[MonsterAI] Arc spawn failed — used fallback")
+
+	-- Fallback: directly opposite the spawn on the X axis
+	monster:PivotTo(CFrame.new(playerSpawnWorld.X + radiusTiles * TILE, MONSTER_Y, playerSpawnWorld.Z))
+	warn("[MonsterAI] Arc spawn failed — used fallback position")
 end
 
--- ── MONSTER_REACH: Arm Extension Visual ──────────────────────
+-- ── MONSTER_REACH visual — red particle aura on arms ─────────
 
 local function applyReachVisual()
 	if not table.find(activeRules, Constants.Rules.MONSTER_REACH) then
 		return
 	end
 
-	local limbNames = {
-		"leftarm", "rightarm",
-		"Left Arm", "Right Arm",
-		"LeftHand", "RightHand",
-	}
+	local limbNames = { "leftarm", "rightarm", "Left Arm", "Right Arm", "LeftHand", "RightHand" }
 
 	for _, name in ipairs(limbNames) do
 		local limb = monster:FindFirstChild(name, true)
@@ -119,45 +124,41 @@ local function applyReachVisual()
 			continue
 		end
 
-		local particles = Instance.new("ParticleEmitter")
-		particles.Name = "ReachAura"
-		particles.Color = ColorSequence.new(Color3.fromRGB(110, 10, 10))
-		particles.LightEmission = 0.15
-		particles.ZOffset = 0.5
-		particles.Size = NumberSequence.new({
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "ReachAura"
+		emitter.Color = ColorSequence.new(Color3.fromRGB(110, 10, 10))
+		emitter.LightEmission = 0.15
+		emitter.ZOffset = 0.5
+		emitter.Size = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 3.5),
 			NumberSequenceKeypoint.new(1, 0.5),
 		})
-		particles.Transparency = NumberSequence.new({
+		emitter.Transparency = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0.1),
-			NumberSequenceKeypoint.new(1, 1),
+			NumberSequenceKeypoint.new(1, 1.0),
 		})
-		particles.Texture = "rbxassetid://8006210660"
-		particles.Lifetime = NumberRange.new(0.6, 1.2)
-		particles.Rate = 60
-		particles.Speed = NumberRange.new(0.5, 1.5)
-		particles.Parent = limb
+		emitter.Texture = "rbxassetid://8006210660"
+		emitter.Lifetime = NumberRange.new(0.6, 1.2)
+		emitter.Rate = 60
+		emitter.Speed = NumberRange.new(0.5, 1.5)
+		emitter.Parent = limb
 	end
 end
 
 -- ── Clone broadcast helper ────────────────────────────────────
+-- Clones only broadcast position/state; awareness is tracked for the
+-- original monster only (to avoid N² FireClient calls per frame).
 
 local function cloneBroadcast(pos: Vector3, stateStr: string, index: number)
-	RE.MonsterPosition:FireAllClients({
-		position = pos,
-		state = stateStr,
-		monsterIndex = index,
-	})
+	RE.MonsterPosition:FireAllClients({ position = pos, state = stateStr, monsterIndex = index })
 end
 
--- ── Remote Listeners ──────────────────────────────────────────
-
+-- ── Remote: player noise relay ────────────────────────────────
 RE.PlayerMakeNoise.OnServerEvent:Connect(function(player, level, position)
 	SensorSystem.AddNoise(player, position, level)
 end)
 
--- ── Rules Processing ──────────────────────────────────────────
-
+-- ── Rules activation ──────────────────────────────────────────
 local function onRulesActivated(rules: { string })
 	activeRules = rules
 	brain:setRules(rules)
@@ -166,60 +167,52 @@ local function onRulesActivated(rules: { string })
 	DuplicationSystem.processRules(monster, rules, cloneBroadcast)
 end
 
--- 1. Listen for the BindableEvent from GameManager
+-- Primary path: BindableEvent from GameManager (fires once at session start)
 local RulesBindable = Remotes:WaitForChild("RulesBindable", 5)
 if RulesBindable and RulesBindable:IsA("BindableEvent") then
 	RulesBindable.Event:Connect(onRulesActivated)
 end
 
--- 2. FALLBACK: read rules directly from SessionInfo if event already fired
+-- Fallback: read directly from SessionInfo in case we missed the BindableEvent
 local sessionInfo = ReplicatedStorage:FindFirstChild("SessionInfo")
 if sessionInfo then
 	local rulesFolder = sessionInfo:FindFirstChild("ActiveRules")
 	if rulesFolder then
-		local loadedRules = {}
-		for _, stringVal in ipairs(rulesFolder:GetChildren()) do
-			table.insert(loadedRules, stringVal.Value)
+		local loaded = {}
+		for _, v in ipairs(rulesFolder:GetChildren()) do
+			table.insert(loaded, v.Value)
 		end
-		if #loadedRules > 0 then
-			onRulesActivated(loadedRules)
+		if #loaded > 0 then
+			onRulesActivated(loaded)
 		end
 	end
 end
 
 applyReachVisual()
 
--- ── Startup: Map Generated ────────────────────────────────────
-
+-- ── Map generated ─────────────────────────────────────────────
 local mapBE = ReplicatedStorage:WaitForChild("ServerMapGenerated")
 mapBE.Event:Connect(function(realGrid, hallInfo)
 	grid = realGrid
 	brain:setGrid(realGrid)
 	DuplicationSystem.setGrid(realGrid)
 
-	-- Dynamic radius: ~28% of map diagonal, clamped 3–10 tiles
+	-- Spawn radius ≈ 28 % of map diagonal, clamped to a sensible range
 	local ROWS = #realGrid
 	local COLS = realGrid[1] and #realGrid[1] or ROWS
-	local dynamicRadius = math.clamp(
-		math.round(math.sqrt(COLS ^ 2 + ROWS ^ 2) * 0.28),
-		3,
-		10
-	)
+	local radius = math.clamp(math.round(math.sqrt(COLS ^ 2 + ROWS ^ 2) * 0.28), 3, 10)
 
 	local TILE = Constants.TILE_SIZE
-	local spawnWorld = Vector3.new(
-		(hallInfo.spawnCol - 1) * TILE, MONSTER_Y, (hallInfo.spawnRow - 1) * TILE
-	)
-	applyReachVisual()
-	spawnAtArc(spawnWorld, dynamicRadius)
+	local spawnWorld = Vector3.new((hallInfo.spawnCol - 1) * TILE, MONSTER_Y, (hallInfo.spawnRow - 1) * TILE)
 
-	-- Start the brain (begins grace period + Heartbeat loop)
+	applyReachVisual()
+	spawnAtArc(spawnWorld, radius)
 	brain:start()
 
-	-- Process rules again in case map loaded after rules were activated
+	-- Process rules again in case they arrived before the map did
 	DuplicationSystem.processRules(monster, activeRules, cloneBroadcast)
 
-	print(("[MonsterAI] Map loaded. Spawn radius = %d tiles. Grace = %ds"):format(dynamicRadius, GRACE_PERIOD))
+	print(("[MonsterAI] Map loaded. Spawn radius = %d tiles. Grace = %ds"):format(radius, GRACE_PERIOD))
 end)
 
 print("[MonsterAI] Initialized. Waiting for map...")

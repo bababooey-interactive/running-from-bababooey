@@ -1,9 +1,10 @@
--- =============================================================
---  DuplicationSystem.luau  (ModuleScript — thin orchestrator)
---  Clones SoulDragger when MONSTER_DUPLICATE rule is active.
---  Each clone gets its own MonsterBrain instance (same AI as original).
---  Exponential: 1 rule = 2 monsters, 2 rules = 4, capped at MAX_TOTAL.
--- =============================================================
+-- DuplicationSystem.luau  (ModuleScript)
+-- ServerScriptService
+--
+-- Spawns additional SoulDragger clones when the MONSTER_DUPLICATE rule is active.
+-- Each clone gets its own MonsterBrain instance with the same rule set.
+-- Stacking: each occurrence of MONSTER_DUPLICATE adds one more clone
+-- (capped at MAX_TOTAL including the original).
 
 local Constants = require(game.ReplicatedStorage.Shared.Constants)
 local MonsterBrain = require(script.Parent.MonsterBrain)
@@ -11,62 +12,62 @@ local MonsterBrain = require(script.Parent.MonsterBrain)
 local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
-local MAX_TOTAL = 16 -- including original
-local CLONE_Y = 0 -- must match MonsterAI's MONSTER_Y
+local MAX_TOTAL = 16 -- maximum monsters alive at once (original + clones)
+local CLONE_Y = 0 -- must match MONSTER_Y in MonsterAI
 
 -- ── State ─────────────────────────────────────────────────────
 local activeClones: { { model: Model, brain: any } } = {}
 local RE_PlayerDied: RemoteEvent?
-local _grid: { { number } } = {}
-local _gridReady = false
+local cachedGrid: { { number } } = {}
+local gridReady = false
 
--- ── Public: store the PlayerDied remote ────────────────────────
+-- ── Public: store the PlayerDied remote ───────────────────────
 
 function DuplicationSystem.init(playerDiedEvent: RemoteEvent)
 	RE_PlayerDied = playerDiedEvent
 end
 
--- ── Public: set the walkable grid (called when map generates) ─
+-- ── Public: forward the walkable grid to existing clone brains ─
 
 function DuplicationSystem.setGrid(grid: { { number } })
-	_grid = grid
-	_gridReady = true
-	-- Push grid to any clone brains that were created before the map
+	cachedGrid = grid
+	gridReady = true
 	for _, entry in ipairs(activeClones) do
 		entry.brain:setGrid(grid)
 	end
 end
 
--- ── Public: activate / extend duplication ──────────────────────
+-- ── Public: spawn clones to match the rules ────────────────────
+-- `onBroadcastClone` is forwarded to each clone brain's onBroadcast
+-- config so clones replicate their position to clients.
 
 function DuplicationSystem.processRules(
 	original: Model,
 	rules: { string },
 	onBroadcastClone: ((Vector3, string, number) -> ())?
 )
+	-- Count how many MONSTER_DUPLICATE rules are active (stackable)
 	local dupCount = 0
 	for _, r in ipairs(rules) do
 		if r == Constants.Rules.MONSTER_DUPLICATE then
 			dupCount += 1
 		end
 	end
+
 	if dupCount == 0 then
 		return
 	end
 
-	local totalMonsters = math.min(1 + dupCount, MAX_TOTAL)
-	local targetClones = totalMonsters - 1
-	local currentClones = #activeClones
+	local targetTotal = math.min(1 + dupCount, MAX_TOTAL)
+	local targetClones = targetTotal - 1
+	local toSpawn = targetClones - #activeClones
 
-	if currentClones >= targetClones then
-		-- Already have enough clones
+	if toSpawn <= 0 then
 		return
 	end
 
-	local clonesToSpawn = targetClones - currentClones
-
-	for i = 1, clonesToSpawn do
-		local cloneIndex = currentClones + i
+	for i = 1, toSpawn do
+		local cloneIndex = #activeClones + i
 		local clone = original:Clone()
 		clone.Name = "SoulDragger_Clone_" .. cloneIndex
 
@@ -78,25 +79,23 @@ function DuplicationSystem.processRules(
 			end
 		end
 
-		local cloneRoot = clone:FindFirstChild("HumanoidRootPart")
-			or clone:FindFirstChild("rb")
-			or clone.PrimaryPart
-		if cloneRoot then
-			cloneRoot.Anchored = true
+		-- Root must be anchored so MonsterBrain can PivotTo it
+		local root = clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChild("rb") or clone.PrimaryPart
+		if root then
+			root.Anchored = true
 		end
 
-		-- Spawn in a ring around the original
+		-- Spread clones in a ring around the original
 		local angle = (cloneIndex / targetClones) * math.pi * 2
 		local offset = Vector3.new(math.cos(angle) * 24, 0, math.sin(angle) * 24)
-		local spawnP = original:GetPivot().Position + offset
-		clone:PivotTo(CFrame.new(Vector3.new(spawnP.X, CLONE_Y, spawnP.Z)))
+		local spawn = original:GetPivot().Position + offset
+		clone:PivotTo(CFrame.new(Vector3.new(spawn.X, CLONE_Y, spawn.Z)))
 		clone.Parent = workspace
 
-		-- Create a MonsterBrain for this clone (no grace, reads speed from Constants)
 		local brain = MonsterBrain.new(clone, rules, {
 			monsterY = CLONE_Y,
 			monsterIndex = cloneIndex + 1, -- original is index 1
-			graceTime = 0, -- clones activate immediately
+			graceTime = 0, -- clones start immediately
 			onDied = function(playerName: string)
 				if RE_PlayerDied then
 					RE_PlayerDied:FireAllClients(playerName)
@@ -105,22 +104,18 @@ function DuplicationSystem.processRules(
 			onBroadcast = onBroadcastClone,
 		})
 
-		-- If the grid is already available, give it to the clone brain now
-		if _gridReady then
-			brain:setGrid(_grid)
+		if gridReady then
+			brain:setGrid(cachedGrid)
 		end
-
 		brain:start()
 
 		table.insert(activeClones, { model = clone, brain = brain })
 	end
 
-	print(
-		("[DupSystem] %d clone(s) spawned → %d total monsters"):format(clonesToSpawn, targetClones + 1)
-	)
+	print(("[DupSystem] %d clone(s) spawned → %d total monsters"):format(toSpawn, targetClones + 1))
 end
 
--- ── Public: update rules on all clone brains mid-session ─────
+-- ── Public: push updated rules to all clone brains ─────────────
 
 function DuplicationSystem.setRules(rules: { string })
 	for _, entry in ipairs(activeClones) do
@@ -128,7 +123,7 @@ function DuplicationSystem.setRules(rules: { string })
 	end
 end
 
--- ── Public: cleanup all clones (on game end) ─────────────────
+-- ── Public: destroy all clones (call on game end / round reset) ─
 
 function DuplicationSystem.cleanup()
 	for _, entry in ipairs(activeClones) do
@@ -138,8 +133,8 @@ function DuplicationSystem.cleanup()
 		end
 	end
 	activeClones = {}
-	_grid = {}
-	_gridReady = false
+	cachedGrid = {}
+	gridReady = false
 	print("[DupSystem] All clones cleaned up.")
 end
 
