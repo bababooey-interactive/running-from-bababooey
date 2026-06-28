@@ -10,8 +10,8 @@ local Constants = {}
 --  PLACE IDs  ← isi setelah publish ke Roblox
 -- ─────────────────────────────────────────────
 
-Constants.LOBBY_PLACE_ID = 0
-Constants.GAME_PLACE_ID = 0
+Constants.LOBBY_PLACE_ID = 96377400695084
+Constants.GAME_PLACE_ID = 80063247865131
 
 -- ─────────────────────────────────────────────
 --  GAME MODES

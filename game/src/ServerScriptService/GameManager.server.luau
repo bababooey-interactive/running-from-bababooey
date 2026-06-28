@@ -137,12 +137,15 @@ local function getSessionData(): { level: number, rules: { string }, mode: strin
 	-- Ambil dari player pertama yang masuk
 	local firstPlayer = Players:GetPlayers()[1]
 	if firstPlayer then
-		local ok, data = pcall(function()
-			return TeleportService:GetLocalPlayerTeleportData()
-		end)
-		-- Note: GetLocalPlayerTeleportData hanya tersedia di LocalScript.
-		-- Untuk server, gunakan pendekatan via DataStore atau BindableEvent dari lobby.
-		-- Sementara fallback ke default di bawah:
+		local joinData = firstPlayer:GetJoinData()
+		local teleportData = joinData and joinData.TeleportData
+		if teleportData and teleportData.level then
+			return {
+				level = teleportData.level,
+				rules = teleportData.rules or {},
+				mode  = teleportData.mode or Constants.GameMode.REGULAR,
+			}
+		end
 	end
 
 	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
