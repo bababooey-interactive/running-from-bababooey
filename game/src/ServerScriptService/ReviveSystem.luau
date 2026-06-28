@@ -59,25 +59,47 @@ local downedState: {
 	{}
 
 -- ─────────────────────────────────────────────
---  HELPER: semua player permanent dead?
+--  HELPER: semua player downed/dead → Game Over
+--  Jika SEMUA player sedang downed (tidak ada yang hidup),
+--  tidak ada yang bisa revive → game over langsung.
 -- ─────────────────────────────────────────────
+local gameOverFired = false
+
 local function checkGameOver()
+	if gameOverFired then
+		return
+	end
+
 	local allPlayers = Players:GetPlayers()
 	if #allPlayers == 0 then
 		return
 	end
 
+	-- Cek apakah SEMUA player sedang downed (tidak ada yang hidup)
+	local allDowned = true
 	for _, player in ipairs(allPlayers) do
 		local state = downedState[player.UserId]
-		-- Kalau ada player yang TIDAK permanent dead = masih hidup/bisa diselamatkan
-		if not state or not state.permanent then
-			return
+		if not state then
+			-- Player ini masih hidup (punya karakter aktif)
+			allDowned = false
+			break
 		end
 	end
 
-	-- Semua permanent dead → Game Over
-	print("[ReviveSystem] Semua player permanent dead — GAME OVER")
-	RE_GameOver:FireAllClients()
+	-- Semua player downed/permanent → Game Over (tidak ada yang bisa revive)
+	if allDowned then
+		gameOverFired = true
+		print("[ReviveSystem] Semua player downed/dead — GAME OVER")
+		RE_GameOver:FireAllClients()
+
+		-- Teleport balik ke lobby setelah 5 detik
+		task.delay(5, function()
+			local TeleportService = game:GetService("TeleportService")
+			for _, player in ipairs(Players:GetPlayers()) do
+				TeleportService:Teleport(Constants.LOBBY_PLACE_ID, player)
+			end
+		end)
+	end
 end
 
 -- ─────────────────────────────────────────────
@@ -133,7 +155,7 @@ local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, P
 
 	-- Raise it by 2 studs so it sits ON the ground, not IN the ground
 	-- Set Y offset to exactly half the height (1.5) so it sits flat on the floor
-	anchor.CFrame = CFrame.new(position + Vector3.new(0, 1.5, 0))
+	anchor.CFrame = CFrame.new(position + Vector3.new(0, 1, 0))
 	anchor.Anchored = true
 	anchor.CanCollide = false
 	anchor.CanQuery = true -- INI HARUS TRUE BIAR PROMPT BISA DITEKAN	-- Make it an actual visible glowing blue hologram so it can't be missed
@@ -341,6 +363,9 @@ local function onPlayerDowned(player: Player, deathPosition: Vector3)
 			REVIVE_COUNTDOWN
 		)
 	)
+
+	-- Cek game over: kalau semua player downed, langsung game over
+	checkGameOver()
 end
 
 -- ─────────────────────────────────────────────
@@ -356,7 +381,7 @@ local function hookCharacter(player: Player, character: Model)
 
 	humanoid.Died:Connect(function()
 		local deathPos = hrp and hrp.Position or Vector3.new(0, 5, 0)
-		task.wait(1) -- Change this to 1 second so the death UI has time to pop up and camera settles
+		task.wait(2.5) -- Change this to 1 second so the death UI has time to pop up and camera settles
 		onPlayerDowned(player, deathPos)
 	end)
 end

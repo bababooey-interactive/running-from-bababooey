@@ -456,6 +456,11 @@ function MonsterBrain:_beginStrike(player: Player)
 			if hum then
 				hum.Health = 0
 			end
+			-- [KONSISTENSI]: Beritahu UI kalau mati karena "monster"
+			local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+			if remotes and remotes:FindFirstChild("PlayerDied") then
+				remotes.PlayerDied:FireAllClients(player.Name, "monster")
+			end
 			-- if self.onDied then
 			-- 	self.onDied(player.Name)
 			-- end
