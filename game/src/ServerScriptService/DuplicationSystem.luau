@@ -13,13 +13,16 @@ local DuplicationSystem = {}
 
 -- ── Config ────────────────────────────────────────────────────
 local MAX_TOTAL = 16 -- maximum monsters alive at once (original + clones)
-local CLONE_Y = 0 -- must match MONSTER_Y in MonsterAI
+local CLONE_Y = 0.428 -- must match MONSTER_Y in MonsterAI
 
 -- ── State ─────────────────────────────────────────────────────
 local activeClones: { { model: Model, brain: any } } = {}
 local RE_PlayerDied: RemoteEvent?
 local cachedGrid: { { number } } = {}
 local gridReady = false
+local pendingOriginal = nil
+local pendingRules = nil
+local pendingBroadcast = nil
 
 -- ── Public: store the PlayerDied remote ───────────────────────
 
@@ -35,19 +38,77 @@ function DuplicationSystem.setGrid(grid: { { number } })
 	for _, entry in ipairs(activeClones) do
 		entry.brain:setGrid(grid)
 	end
+
+	-- THE FIX: If rules were loaded before the map, spawn the clones NOW.
+	if pendingOriginal and pendingRules then
+		-- Wait one tick so the main MonsterAI has time to teleport
+		-- the original monster into the maze before we copy its position!
+		task.spawn(function()
+			task.wait()
+			DuplicationSystem.processRules(pendingOriginal, pendingRules, pendingBroadcast)
+		end)
+
+		pendingOriginal = nil
+		pendingRules = nil
+		pendingBroadcast = nil
+	end
 end
 
 -- ── Public: spawn clones to match the rules ────────────────────
 -- `onBroadcastClone` is forwarded to each clone brain's onBroadcast
 -- config so clones replicate their position to clients.
+--
+-- Helper: find a valid floor tile near a desired world position
+local function spawnCloneAtValidTile(targetWorldPos: Vector3, clone: Model)
+	if not gridReady or #cachedGrid == 0 then
+		-- Fallback if grid isn't ready
+		clone:PivotTo(CFrame.new(Vector3.new(targetWorldPos.X, CLONE_Y, targetWorldPos.Z)))
+		return
+	end
+
+	local TILE = Constants.TILE_SIZE
+	local targetCol = math.clamp(math.round(targetWorldPos.X / TILE) + 1, 1, #(cachedGrid[1] or {}))
+	local targetRow = math.clamp(math.round(targetWorldPos.Z / TILE) + 1, 1, #cachedGrid)
+
+	local bestCol, bestRow = targetCol, targetRow
+	local closestDist = math.huge
+
+	for r = 1, #cachedGrid do
+		for c = 1, #(cachedGrid[r] or {}) do
+			local tileType = cachedGrid[r][c]
+			-- Allow spawning as long as it's not a WALL and not the SPAWN point
+			if tileType and tileType ~= Constants.Tile.WALL and tileType ~= Constants.Tile.SPAWN then
+				local dist = math.sqrt((c - targetCol) ^ 2 + (r - targetRow) ^ 2)
+				if dist < closestDist then
+					closestDist = dist
+					bestCol = c
+					bestRow = r
+				end
+			end
+		end
+	end
+
+	local finalPos = Vector3.new((bestCol - 1) * TILE, CLONE_Y, (bestRow - 1) * TILE)
+	clone:PivotTo(CFrame.new(finalPos))
+end
 
 function DuplicationSystem.processRules(
 	original: Model,
 	rules: { string },
 	onBroadcastClone: ((Vector3, string, number) -> ())?
 )
+	-- THE FIX: Don't spawn yet if the map doesn't exist! Queue it up instead.
+	if not gridReady or #cachedGrid == 0 then
+		pendingOriginal = original
+		pendingRules = rules
+		pendingBroadcast = onBroadcastClone
+		print("[DupSystem] Grid not ready yet. Queuing clones for later!")
+		return
+	end
+
 	-- Count how many MONSTER_DUPLICATE rules are active (stackable)
 	local dupCount = 0
+	-- ... (Keep the rest of your processRules code exactly the same below this)
 	for _, r in ipairs(rules) do
 		if r == Constants.Rules.MONSTER_DUPLICATE then
 			dupCount += 1
@@ -88,8 +149,10 @@ function DuplicationSystem.processRules(
 		-- Spread clones in a ring around the original
 		local angle = (cloneIndex / targetClones) * math.pi * 2
 		local offset = Vector3.new(math.cos(angle) * 24, 0, math.sin(angle) * 24)
-		local spawn = original:GetPivot().Position + offset
-		clone:PivotTo(CFrame.new(Vector3.new(spawn.X, CLONE_Y, spawn.Z)))
+		local idealSpawn = original:GetPivot().Position + offset
+
+		-- FIX: Use the grid-aware spawner so clones don't get stuck in walls!
+		spawnCloneAtValidTile(idealSpawn, clone)
 		clone.Parent = workspace
 
 		local brain = MonsterBrain.new(clone, rules, {

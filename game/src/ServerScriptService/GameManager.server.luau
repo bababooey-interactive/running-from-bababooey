@@ -134,7 +134,7 @@ end
 --
 --  Fallback: level 1, rules di-random dari pool (bukan hardcode lagi)
 -- ─────────────────────────────────────────────
-local function getSessionData()  --: { level: number, rules: { string }, mode: string }
+local function getSessionData() --: { level: number, rules: { string }, mode: string }
 	-- Ambil dari player pertama yang masuk
 	local firstPlayer = Players:GetPlayers()[1]
 	if firstPlayer then
@@ -144,14 +144,14 @@ local function getSessionData()  --: { level: number, rules: { string }, mode: s
 			return {
 				level = teleportData.level,
 				rules = teleportData.rules or {},
-				mode  = teleportData.mode or Constants.GameMode.REGULAR,
+				mode = teleportData.mode or Constants.GameMode.REGULAR,
 			}
 		end
 	end
 
 	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
 	-- TODO: ganti level di sini untuk testing manual level berapa pun
-	local level = 3
+	local level = 9
 
 	return {
 		level = level,
@@ -201,11 +201,11 @@ end
 math.randomseed(os.time())
 
 -- Tunggu player pertama join supaya GetJoinData() bisa dibaca
-local firstPlayer = Players:GetPlayers()[1] 
-    or Players.PlayerAdded:Wait()
+local firstPlayer = Players:GetPlayers()[1] or Players.PlayerAdded:Wait()
+
+task.wait() -- yield one heartbeat so MonsterAI can connect its ServerMapGenerated listener
 
 local session = getSessionData()
-MapGenerator.generateMap(session.level)
 
 print(
 	string.format(
@@ -216,16 +216,16 @@ print(
 	)
 )
 
--- Init task system dulu (task objects di-hook)
-TaskSystem.init(session.level)
-
--- Init survival system (hanya rules yang aktif)
-SurvivalSystem.init(session.rules)
-
 -- ─────────────────────────────────────────────
---  Expose session info ke ReplicatedStorage
---  agar client bisa tahu rules mana yang aktif
+--  1. SessionInfo + RulesBindable DULU
+--     MonsterAI.server.luau melakukan WaitForChild("RulesBindable", 5)
+--     SEBELUM ia connect listener ServerMapGenerated.
+--     Kalau kita generate map sebelum RulesBindable ada, MonsterAI
+--     masih tertahan 5 detik → event map sudah terlewat.
 -- ─────────────────────────────────────────────
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_RulesActivated = Remotes:WaitForChild("RulesActivated")
+
 local sessionInfo = Instance.new("Folder")
 sessionInfo.Name = "SessionInfo"
 sessionInfo.Parent = ReplicatedStorage
@@ -246,78 +246,42 @@ rulesFolder.Parent = sessionInfo
 
 for i, rule in ipairs(session.rules) do
 	local v = Instance.new("StringValue")
-	-- Name dibuat unik (rule .. index) supaya MONSTER_DUPLICATE yang
-	-- di-stack lebih dari sekali tidak saling menimpa di bawah Folder
-	-- yang sama (2 child tidak boleh nama sama persis kalau mau
-	-- di-:GetChildren() dengan aman satu-satu).
 	v.Name = rule .. "_" .. i
 	v.Value = rule
 	v.Parent = rulesFolder
 end
 
--- ─────────────────────────────────────────────
---  Broadcast rules ke CLIENT lewat RemoteEvent "RulesActivated"
---  (sudah dibuat oleh RemoteSetup.server.luau, comment di situ:
---  "server→all: active rules list" — jadi ini memang sudah
---  direncanakan tim, kita tinggal pakai).
---
---  PENTING: RemoteSetup.server.luau HARUS jalan duluan sebelum
---  GameManager (urutan di ServerScriptService biasanya alfabetis,
---  "GameManager" < "RemoteSetup" secara abjad — kalau Studio jalanin
---  alfabetis, ini bisa salah urutan! Cek Script Order kalau error
---  "infinite yield" muncul di WaitForChild di bawah ini).
--- ─────────────────────────────────────────────
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local RE_RulesActivated = Remotes:WaitForChild("RulesActivated")
-
 RE_RulesActivated:FireAllClients(session.rules)
 
--- ─────────────────────────────────────────────
---  RulesBindable (BindableEvent, Server -> Server)
---
---  Untuk script SERVER lain (mis. MonsterAI.server.luau) yang butuh
---  rules begitu sesi mulai. RemoteEvent "RulesActivated" di atas itu
---  cuma untuk Server -> Client, TIDAK bisa di-:Connect() dari server
---  lain (server tidak punya .OnClientEvent). Makanya tetap disediakan
---  BindableEvent terpisah ini khusus untuk kebutuhan server -> server.
---
---  CATATAN PENTING: nama-nya "RulesBindable", BUKAN "RulesActivated".
---  "RulesActivated" sudah dipakai sebagai RemoteEvent (lihat di atas).
---  RemoteEvent dan BindableEvent itu beda class — RemoteEvent tidak
---  punya method :Fire() (cuma :FireServer()/:FireClient()/dst), jadi
---  kalau nama dipakai sama, FindFirstChild akan nemu RemoteEvent itu
---  dan crash saat dipanggil :Fire(). Makanya dipakai nama unik di sini.
---
---  Payload: array of string (session.rules), SAMA PERSIS isinya
---  dengan ReplicatedStorage.SessionInfo.ActiveRules (cuma beda
---  bentuk: ini array biasa, bukan Folder of StringValue).
---
---  Cara pakai di MonsterAI.server.luau (tinggal sambungkan sendiri):
---    local Remotes = ReplicatedStorage:WaitForChild("Remotes")
---    Remotes:WaitForChild("RulesBindable").Event:Connect(function(rules)
---        activeRules = rules
---    end)
---
---  Catatan: event ini di-fire SEKALI saat GameManager init (server
---  start). Kalau script lain baru listen SETELAH fire ini terjadi,
---  mereka akan miss event-nya — dalam kasus itu, baca langsung dari
---  ReplicatedStorage.SessionInfo.ActiveRules sebagai fallback.
--- ─────────────────────────────────────────────
 local RulesBindable = Remotes:FindFirstChild("RulesBindable")
-
--- Validasi tipe: kalau somehow ada instance lama dengan nama ini tapi
--- bukan BindableEvent (mis. sisa RemoteEvent dari percobaan lain),
--- buang dan buat ulang yang benar, daripada crash diam-diam.
 if RulesBindable and not RulesBindable:IsA("BindableEvent") then
 	warn("[GameManager] Instance 'RulesBindable' ditemukan tapi bukan BindableEvent, akan dibuat ulang.")
 	RulesBindable:Destroy()
 	RulesBindable = nil
 end
-
 if not RulesBindable then
 	RulesBindable = Instance.new("BindableEvent")
 	RulesBindable.Name = "RulesBindable"
 	RulesBindable.Parent = Remotes
 end
-
 RulesBindable:Fire(session.rules)
+
+-- ─────────────────────────────────────────────
+--  2. Yield satu heartbeat
+--     RulesBindable baru di-parent → MonsterAI di-queue untuk resume.
+--     Tapi MonsterAI baru benar-benar jalan setelah kita yield.
+--     Selama heartbeat ini MonsterAI: dapat RulesBindable, baca
+--     SessionInfo, lalu connect mapBE.Event — siap menerima event map.
+-- ─────────────────────────────────────────────
+task.wait()
+
+-- ─────────────────────────────────────────────
+--  3. Generate map — MonsterAI listener sudah terpasang
+-- ─────────────────────────────────────────────
+MapGenerator.generateMap(session.level)
+
+-- ─────────────────────────────────────────────
+--  4. Init systems (setelah map ada di workspace)
+-- ─────────────────────────────────────────────
+TaskSystem.init(session.level)
+SurvivalSystem.init(session.rules)

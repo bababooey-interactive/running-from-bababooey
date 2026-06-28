@@ -41,7 +41,7 @@ for _, part in ipairs(monster:GetDescendants()) do
 end
 
 -- ── Constants ─────────────────────────────────────────────────
-local MONSTER_Y = 0
+local MONSTER_Y = 0.428
 local GRACE_PERIOD = 8
 
 -- ── State ─────────────────────────────────────────────────────
@@ -94,7 +94,9 @@ local function spawnAtArc(playerSpawnWorld: Vector3, radiusTiles: number)
 		local r = radiusTiles + math.random(-2, 2)
 		local col = math.clamp(math.round(cCol + math.cos(angle) * r), 1, COLS)
 		local row = math.clamp(math.round(cRow + math.sin(angle) * r), 1, ROWS)
-		if grid[row] and grid[row][col] and grid[row][col] ~= 0 then
+		local tileType = grid[row] and grid[row][col]
+		-- Allow spawning as long as it's not a WALL and not the SPAWN point
+		if tileType and tileType ~= Constants.Tile.WALL and tileType ~= Constants.Tile.SPAWN then
 			monster:PivotTo(CFrame.new(Vector3.new((col - 1) * TILE, MONSTER_Y, (row - 1) * TILE)))
 			print(("[MonsterAI] Spawned at tile (%d, %d)"):format(col, row))
 			return
