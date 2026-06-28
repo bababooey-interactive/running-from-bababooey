@@ -277,13 +277,13 @@ local function scanTaskObjects()
 	end
 	for _, obj in ipairs(taskFolder:GetDescendants()) do
 		if obj:GetAttribute("TaskType") then
-		--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
+			--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
 		end
 	end
 	taskFolder.DescendantAdded:Connect(function(obj)
-		
-		--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
+		if obj:GetAttribute("TaskType") then
+			--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
 		end
 	end)

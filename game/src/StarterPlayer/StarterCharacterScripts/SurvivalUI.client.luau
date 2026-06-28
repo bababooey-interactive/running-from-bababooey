@@ -592,13 +592,28 @@ local function updateDark(ui, timer, inDark)
 	end
 end
 
-local function showMessage(ui, text, color)
+local function showMessage(ui, text, color, duration)
 	ui.msgOverlay.Visible = true
 	ui.msgLabel.Text = text
 	ui.msgLabel.TextColor3 = color
+	ui.msgLabel.TextTransparency = 0 -- Pastikan teks full terlihat
+
 	TweenService:Create(ui.msgOverlay, TweenInfo.new(0.4), {
 		BackgroundTransparency = 0.35,
 	}):Play()
+
+	-- Kalau ada durasi, hilangkan UI setelah waktu habis
+	if duration then
+		task.delay(duration, function()
+			TweenService:Create(ui.msgOverlay, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+			local fadeText = TweenService:Create(ui.msgLabel, TweenInfo.new(0.5), { TextTransparency = 1 })
+			fadeText:Play()
+
+			fadeText.Completed:Once(function()
+				ui.msgOverlay.Visible = false
+			end)
+		end)
+	end
 end
 
 -- ─────────────────────────────────────────────
@@ -731,8 +746,16 @@ end)
 
 RE_PlayerDied.OnClientEvent:Connect(function(playerName, cause)
 	if playerName == LocalPlayer.Name then
-		local txt = cause == "hunger" and "💀 Kamu kelaparan!" or "💀 Kegelapan menelanmu!"
-		showMessage(ui, txt, C.DEATH_RED)
+		-- Cek penyebab kematian yang spesifik
+		local txt = "💀 Kamu Terbunuh!"
+		if cause == "hunger" then
+			txt = "💀 Kamu Kelaparan!"
+		elseif cause == "darkness" then
+			txt = "💀 Kegelapan Menelanmu!"
+		end
+
+		-- Angka 2.5 di bawah adalah durasi (detik) sebelum layar ini menghilang
+		showMessage(ui, txt, C.DEATH_RED, 2.5)
 	end
 end)
 

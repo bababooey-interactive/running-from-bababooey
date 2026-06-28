@@ -22,7 +22,7 @@ local RE_DepositCoal = Remotes:WaitForChild("DepositCoal")
 local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 
 -- ── Config ─────────────────────────────────────────────────────
-local FIREPLACE_DEPOSIT_RADIUS = 12
+local FIREPLACE_DEPOSIT_RADIUS = 20
 local PICKUP_RADIUS = 5
 local BOULDER_NAMES = {
 	boulder_small = true,
@@ -67,14 +67,15 @@ local function findFireplacePosition()
 			end
 		end
 	end
-	local fp = Workspace:FindFirstChild("old_fireplace_prop")
-	if fp then
-		local part = getPrimaryOrFirstPart(fp)
-		if part then
-			return part.Position
+	-- Deep search fallback (server does this too)
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc:IsA("Model") and desc.Name:lower():find("fireplace") then
+			local part = getPrimaryOrFirstPart(desc)
+			if part then
+				return part.Position
+			end
+			return desc:GetPivot().Position
 		end
-		-- Fallback: pakai pivot position
-		return fp:GetPivot().Position
 	end
 	return nil
 end

@@ -125,6 +125,7 @@ end
 --  SPAWN GHOST ANCHOR
 --  Part transparan di posisi mati sebagai adornee ProximityPrompt
 -- ─────────────────────────────────────────────
+
 local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, ProximityPrompt)
 	local anchor = Instance.new("Part")
 	anchor.Name = GHOST_ANCHOR_NAME .. "_" .. player.Name
@@ -134,7 +135,7 @@ local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, P
 	anchor.CFrame = CFrame.new(position + Vector3.new(0, 2, 0))
 	anchor.Anchored = true
 	anchor.CanCollide = false
-	anchor.CanQuery = false
+	anchor.CanQuery = true
 
 	-- Make it an actual visible glowing blue hologram so it can't be missed
 	anchor.Transparency = 0.5
@@ -368,42 +369,48 @@ end
 -- ─────────────────────────────────────────────
 Players.CharacterAutoLoads = false
 
--- Spawn karakter pertama kali saat player join
-Players.PlayerAdded:Connect(function(player)
-	-- Load karakter pertama kali manual
-	player:LoadCharacter()
+local ReviveSystem = {}
 
-	player.CharacterAdded:Connect(function(character)
-		hookCharacter(player, character)
-	end)
-end)
-
--- Handle player yang sudah ada sebelum script jalan
-for _, player in ipairs(Players:GetPlayers()) do
-	if player.Character then
-		hookCharacter(player, player.Character)
-	else
+function ReviveSystem.init()
+	-- Spawn karakter pertama kali saat player join
+	Players.PlayerAdded:Connect(function(player)
+		-- Load karakter pertama kali manual
 		player:LoadCharacter()
-	end
-	player.CharacterAdded:Connect(function(character)
-		hookCharacter(player, character)
+
+		player.CharacterAdded:Connect(function(character)
+			hookCharacter(player, character)
+		end)
 	end)
+
+	-- Handle player yang sudah ada sebelum script jalan
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			hookCharacter(player, player.Character)
+		else
+			player:LoadCharacter()
+		end
+		player.CharacterAdded:Connect(function(character)
+			hookCharacter(player, character)
+		end)
+	end
+
+	-- ─────────────────────────────────────────────
+	--  CLEANUP saat player leave
+	-- ─────────────────────────────────────────────
+	Players.PlayerRemoving:Connect(function(player)
+		local state = downedState[player.UserId]
+		if state then
+			if state.thread then
+				task.cancel(state.thread)
+			end
+			cleanupAnchor(player.UserId)
+			downedState[player.UserId] = nil
+		end
+		-- Cek game over setelah player leave
+		task.defer(checkGameOver)
+	end)
+
+	print("[ReviveSystem] Initialized — REVIVE_TIMER:", REVIVE_COUNTDOWN, "s | HOLD:", REVIVE_HOLD, "s")
 end
 
--- ─────────────────────────────────────────────
---  CLEANUP saat player leave
--- ─────────────────────────────────────────────
-Players.PlayerRemoving:Connect(function(player)
-	local state = downedState[player.UserId]
-	if state then
-		if state.thread then
-			task.cancel(state.thread)
-		end
-		cleanupAnchor(player.UserId)
-		downedState[player.UserId] = nil
-	end
-	-- Cek game over setelah player leave
-	task.defer(checkGameOver)
-end)
-
-print("[ReviveSystem] Initialized — REVIVE_TIMER:", REVIVE_COUNTDOWN, "s | HOLD:", REVIVE_HOLD, "s")
+return ReviveSystem

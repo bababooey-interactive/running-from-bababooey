@@ -25,6 +25,7 @@ local Constants = require(ReplicatedStorage.Shared.Constants)
 local TaskSystem = require(script.Parent.TaskSystem)
 local SurvivalSystem = require(script.Parent.SurvivalSystem)
 local MapGenerator = require(script.Parent.MapGenerator)
+local ReviveSystem = require(script.Parent.ReviveSystem)
 
 -- ─────────────────────────────────────────────
 --  RANDOM RULE PICKER
@@ -152,7 +153,7 @@ local function getSessionData(firstPlayer: Player) --: { level: number, rules: {
 	end
 
 	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
-	local level = 6
+	local level = 3
 	return {
 		level = level,
 		rules = generateRulesForLevel(level),
@@ -284,3 +285,4 @@ MapGenerator.generateMap(session.level)
 -- ─────────────────────────────────────────────
 TaskSystem.init(session.level)
 SurvivalSystem.init(session.rules)
+ReviveSystem.init()
