@@ -202,7 +202,7 @@ end
 math.randomseed(os.time())
 
 local firstPlayer = Players:GetPlayers()[1] or Players.PlayerAdded:Wait()
-
+task.wait(4)
 task.wait() -- yield one heartbeat so MonsterAI can connect its ServerMapGenerated listener
 
 local session = getSessionData(firstPlayer) -- FIX: Pass firstPlayer here

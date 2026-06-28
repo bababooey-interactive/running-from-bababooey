@@ -1,28 +1,6 @@
 -- =============================================================
 --  SpectateSystem.client.luau
 --  Path: game/src/StarterPlayer/StarterPlayerScripts/SpectateSystem.client.luau
---
---  Aktif saat local player mati (downed), nonaktif saat di-revive.
---  Mode: follow player hidup tertentu, bisa ganti target.
---
---  Cara kerja:
---  1. RE_PlayerDowned (local player) → aktifkan spectate
---  2. RE_PlayerRevived (local player) → nonaktifkan spectate
---  3. RE_GameOver → spectate tetap aktif (tidak ada yang bisa revive)
---
---  Kontrol:
---  - Keyboard: Q / E untuk ganti target
---  - UI: klik tombol nama player untuk langsung spectate mereka
---
---  Kamera:
---  - Camera.CameraType = Scriptable
---  - Posisi di belakang/atas target (third-person follow)
---  - Smooth lerp agar tidak patah-patah
---
---  Sinergi dengan HorrorCamera.client.luau:
---  HorrorCamera hanya aktif kalau player punya karakter hidup.
---  Saat spectate, local player tidak punya karakter aktif (sudah mati),
---  jadi HorrorCamera tidak interferensi.
 -- =============================================================
 
 local Players = game:GetService("Players")
@@ -96,6 +74,7 @@ spectateLabel.TextColor3 = Color3.fromRGB(140, 140, 180)
 spectateLabel.TextSize = 11
 spectateLabel.Font = Enum.Font.GothamBold
 spectateLabel.Text = "👁  SPECTATING"
+spectateLabel.Visible = false -- Sembunyikan label tulisan atas jika tidak diperlukan
 spectateLabel.Parent = bottomBar
 
 -- ── Row tombol player ────────────────────────
@@ -105,6 +84,7 @@ playerRow.AnchorPoint = Vector2.new(0.5, 1)
 playerRow.Position = UDim2.new(0.5, 0, 1, -6)
 playerRow.Size = UDim2.new(1, -16, 0, 26)
 playerRow.BackgroundTransparency = 1
+playerRow.Visible = false -- 🌟 PERBAIKAN: Set ke false agar nama kecil tidak muncul & menumpuk!
 playerRow.Parent = bottomBar
 
 local rowLayout = Instance.new("UIListLayout")
@@ -164,7 +144,7 @@ targetName.TextColor3 = Color3.fromRGB(230, 230, 255)
 targetName.TextSize = 15
 targetName.Font = Enum.Font.GothamBold
 targetName.Text = ""
-targetName.Visible = false
+targetName.Visible = true -- 🌟 PERBAIKAN: Set ke true agar nama utama di dalam bar aktif
 targetName.Parent = bottomBar
 
 -- ── "DOWNED" badge kiri atas ─────────────────
@@ -237,7 +217,7 @@ local function setTarget(player: Player?)
 end
 
 -- ─────────────────────────────────────────────
---  REFRESH PLAYER BUTTONS di playerRow
+--  REFRESH PLAYER LOGIC
 -- ─────────────────────────────────────────────
 local playerButtons: { TextButton } = {}
 
@@ -274,22 +254,6 @@ local function refreshPlayerButtons()
 		btn.MouseButton1Click:Connect(function()
 			setTarget(player)
 			refreshPlayerButtons()
-		end)
-
-		-- Hover
-		btn.MouseEnter:Connect(function()
-			if spectateTarget ~= player then
-				TweenService:Create(btn, TweenInfo.new(0.1), {
-					BackgroundColor3 = Color3.fromRGB(45, 45, 65),
-				}):Play()
-			end
-		end)
-		btn.MouseLeave:Connect(function()
-			if spectateTarget ~= player then
-				TweenService:Create(btn, TweenInfo.new(0.1), {
-					BackgroundColor3 = Color3.fromRGB(30, 30, 45),
-				}):Play()
-			end
 		end)
 
 		table.insert(playerButtons, btn)
@@ -377,15 +341,11 @@ local function startCameraFollow()
 			return
 		end
 
-		-- Target CFrame: di belakang dan atas target, menghadap ke target
-		local targetCF = hrp.CFrame * CFrame.new(0, CAM_HEIGHT, CAM_DISTANCE) -- offset belakang + atas
-
-		-- Arahkan kamera ke kepala target
+		local targetCF = hrp.CFrame * CFrame.new(0, CAM_HEIGHT, CAM_DISTANCE)
 		local headPos = hrp.Position + Vector3.new(0, 2, 0)
 		local camPos = targetCF.Position
 		local lookCF = CFrame.lookAt(camPos, headPos)
 
-		-- Smooth lerp
 		local lerpFactor = math.clamp(CAM_LERP * (dt / (1 / 60)), 0, 1)
 		currentCamCF = currentCamCF:Lerp(lookCF, lerpFactor)
 
@@ -399,7 +359,6 @@ local function stopCameraFollow()
 		camConnection:Disconnect()
 		camConnection = nil
 	end
-	-- Kembalikan ke kamera normal
 	Camera.CameraType = Enum.CameraType.Custom
 end
 
@@ -416,7 +375,6 @@ local function startSpectate()
 
 	screenGui.Enabled = true
 
-	-- Pilih target awal: player hidup pertama
 	local list = getLivePlayers()
 	if #list > 0 then
 		setTarget(list[1])
@@ -427,7 +385,6 @@ local function startSpectate()
 
 	startCameraFollow()
 
-	-- Refresh player buttons tiap 2 detik (antisipasi player mati/revive)
 	refreshInterval = task.spawn(function()
 		while isSpectating do
 			task.wait(2)
@@ -465,7 +422,6 @@ RE_PlayerDowned.OnClientEvent:Connect(function(data)
 	if data.playerName ~= LocalPlayer.Name then
 		return
 	end
-	-- Local player downed → aktifkan spectate
 	startSpectate()
 end)
 
@@ -473,14 +429,9 @@ RE_PlayerRevived.OnClientEvent:Connect(function(data)
 	if data.playerName ~= LocalPlayer.Name then
 		return
 	end
-	-- Local player di-revive → nonaktifkan spectate
 	stopSpectate()
 end)
 
--- ─────────────────────────────────────────────
---  HANDLE player lain mati saat sedang di-spectate
---  → kalau target kita yang mati, auto pindah ke player berikutnya
--- ─────────────────────────────────────────────
 RE_PlayerDowned.OnClientEvent:Connect(function(data)
 	if not isSpectating then
 		return
@@ -489,9 +440,8 @@ RE_PlayerDowned.OnClientEvent:Connect(function(data)
 		return
 	end
 
-	-- Kalau target kita yang downed, cari target lain
 	if spectateTarget and data.playerName == spectateTarget.Name then
-		task.wait(0.5) -- beri waktu state ter-update
+		task.wait(0.5)
 		navigateTarget(1)
 	end
 
@@ -505,15 +455,10 @@ RE_PlayerRevived.OnClientEvent:Connect(function(data)
 	if data.playerName == LocalPlayer.Name then
 		return
 	end
-	-- Player lain di-revive → refresh list (mungkin ada target baru)
 	refreshPlayerButtons()
 end)
 
--- ─────────────────────────────────────────────
---  CLEANUP saat script init (reset state)
--- ─────────────────────────────────────────────
 LocalPlayer.CharacterAdded:Connect(function()
-	-- Karakter baru = sudah di-revive, pastikan spectate off
 	stopSpectate()
 end)
 
