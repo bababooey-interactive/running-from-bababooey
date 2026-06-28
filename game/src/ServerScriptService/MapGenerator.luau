@@ -1017,7 +1017,7 @@ local function placeLeverObjects(taskFolder, placeableTiles, level, grid)
 			--	* CFrame.Angles(0, facingAngle, 0)
 			--	* CFrame.Angles(math.rad(-90), 0, 0)
 		--else
-			leverCFrame = CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
+			local leverCFrame = CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
 				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0)
 		--end
 
