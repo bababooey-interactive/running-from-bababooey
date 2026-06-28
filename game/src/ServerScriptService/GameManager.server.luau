@@ -28,14 +28,49 @@ local SurvivalSystem = require(script.Parent.SurvivalSystem)
 -- ─────────────────────────────────────────────
 --  RANDOM RULE PICKER
 --  Pick `count` rule unik dari Constants.RULES_POOL (no-repeat).
---  Kalau count >= jumlah pool, return semua pool apa adanya.
+--  GARANSI: Minimal 1 rule sensor (HEAR/SEE/SMELL) akan terpilih
+--  agar monster tidak buta/tuli di level-level awal.
 -- ─────────────────────────────────────────────
 local function pickRandomRules(count: number): { string }
 	local pool = table.clone(Constants.RULES_POOL)
 	local picked = {}
 
 	count = math.min(count, #pool)
+	if count <= 0 then
+		return picked
+	end
 
+	-- 1. Definisikan rule yang termasuk "Sense" (Indera)
+	local senses = {
+		Constants.Rules.MONSTER_HEAR,
+		Constants.Rules.MONSTER_SEE,
+		Constants.Rules.MONSTER_SMELL,
+	}
+
+	-- 2. Cari sense apa saja yang tersedia di dalam pool saat ini
+	local availableSenses = {}
+	for _, rule in ipairs(pool) do
+		if table.find(senses, rule) then
+			table.insert(availableSenses, rule)
+		end
+	end
+
+	-- 3. Paksa pilih 1 sense secara acak sebagai rule pertama
+	if #availableSenses > 0 then
+		local forcedSense = availableSenses[math.random(1, #availableSenses)]
+		table.insert(picked, forcedSense)
+
+		-- Hapus dari pool agar tidak terpilih dua kali
+		local poolIndex = table.find(pool, forcedSense)
+		if poolIndex then
+			table.remove(pool, poolIndex)
+		end
+
+		-- Kurangi jatah pick karena kita sudah ambil 1
+		count = count - 1
+	end
+
+	-- 4. Pilih sisanya secara acak dari sisa pool (bisa jadi dapat sense tambahan)
 	for _ = 1, count do
 		local index = math.random(1, #pool)
 		table.insert(picked, pool[index])
