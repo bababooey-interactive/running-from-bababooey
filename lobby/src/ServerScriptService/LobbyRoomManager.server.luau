@@ -665,4 +665,3 @@ end
 -- ============================================================
 
 setupPlates()
--- the aura in the plate is a cylinder for some reason. follow the shape of th plate, that is a square. and also, let's not have individual script llike that. maybe organize it to each coop folder and solo folder for the plates, then script it from sesrver or something. tho honestsly just remove the sparkle, but keep the semi-transparent block, just make it square. oh yeah, index the plates as well

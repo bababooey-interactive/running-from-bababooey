@@ -134,25 +134,25 @@ end
 --
 --  Fallback: level 1, rules di-random dari pool (bukan hardcode lagi)
 -- ─────────────────────────────────────────────
-local function getSessionData() --: { level: number, rules: { string }, mode: string }
-	-- Ambil dari player pertama yang masuk
-	local firstPlayer = Players:GetPlayers()[1]
+-- 1. Pass 'firstPlayer' into the function and fix the rules assignment
+local function getSessionData(firstPlayer: Player) --: { level: number, rules: { string }, mode: string }
 	if firstPlayer then
 		local joinData = firstPlayer:GetJoinData()
 		local teleportData = joinData and joinData.TeleportData
 		if teleportData and teleportData.level then
+			local targetLevel = teleportData.level
 			return {
-				level = teleportData.level,
-				rules = teleportData.rules or {},
+				level = targetLevel,
+				-- FIX: If lobby didn't send custom rules, generate them based on the level!
+				rules = (teleportData.rules and #teleportData.rules > 0) and teleportData.rules
+					or generateRulesForLevel(targetLevel),
 				mode = teleportData.mode or Constants.GameMode.REGULAR,
 			}
 		end
 	end
 
 	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
-	-- TODO: ganti level di sini untuk testing manual level berapa pun
-	local level = 9
-
+	local level = 1
 	return {
 		level = level,
 		rules = generateRulesForLevel(level),
@@ -200,12 +200,11 @@ end
 -- ─────────────────────────────────────────────
 math.randomseed(os.time())
 
--- Tunggu player pertama join supaya GetJoinData() bisa dibaca
 local firstPlayer = Players:GetPlayers()[1] or Players.PlayerAdded:Wait()
 
 task.wait() -- yield one heartbeat so MonsterAI can connect its ServerMapGenerated listener
 
-local session = getSessionData()
+local session = getSessionData(firstPlayer) -- FIX: Pass firstPlayer here
 
 print(
 	string.format(

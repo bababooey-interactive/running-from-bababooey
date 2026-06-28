@@ -34,10 +34,12 @@
 	terisi otomatis dari kedua cara itu.
 ]]
 
-local Players          = game:GetService("Players")
+local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ProgressStore = DataStoreService:GetDataStore("PlayerProgress_v1")
+local Constants = require(ReplicatedStorage.Shared.Constants)
+local ProgressStore = DataStoreService:GetDataStore("PlayerProgress_v2")
 
 local PlayerProgressStore = {}
 
@@ -47,7 +49,7 @@ local PlayerProgressStore = {}
 
 local function getDefaultProgress()
 	return {
-		unlockedLevel  = 1, -- player baru mulai dari level 1, BUKAN langsung 10
+		unlockedLevel = Constants.DEFAULT_UNLOCKED_LEVELS,
 		highestEndless = 0,
 	}
 end
@@ -76,16 +78,19 @@ function PlayerProgressStore.Load(player: Player)
 		progress = result
 	else
 		if not ok then
-			warn(string.format(
-				"[PlayerProgressStore] Gagal GetAsync untuk %s: %s. Pakai default.",
-				player.Name, tostring(result)
-			))
+			warn(
+				string.format(
+					"[PlayerProgressStore] Gagal GetAsync untuk %s: %s. Pakai default.",
+					player.Name,
+					tostring(result)
+				)
+			)
 		end
 		progress = getDefaultProgress()
 	end
 
 	-- Jaga-jaga field baru yang belum ada di data lama (migrasi ringan)
-	progress.unlockedLevel  = progress.unlockedLevel or 1
+	progress.unlockedLevel = math.max(progress.unlockedLevel or 1, Constants.DEFAULT_UNLOCKED_LEVELS)
 	progress.highestEndless = progress.highestEndless or 0
 
 	cache[player.UserId] = progress
@@ -110,7 +115,10 @@ function PlayerProgressStore.Save(player: Player)
 			-- (mis. kalau ada 2 server nyimpen hampir bersamaan).
 			if old then
 				return {
-					unlockedLevel  = math.max(old.unlockedLevel or 1, progress.unlockedLevel),
+					unlockedLevel = math.max(
+						old.unlockedLevel or Constants.DEFAULT_UNLOCKED_LEVELS,
+						progress.unlockedLevel
+					),
 					highestEndless = math.max(old.highestEndless or 0, progress.highestEndless),
 				}
 			end
@@ -145,11 +153,16 @@ function PlayerProgressStore.ApplyMatchResult(player: Player, teleportData: any)
 			progress.unlockedLevel = math.max(progress.unlockedLevel, teleportData.levelPlayed + 1)
 		end
 
-		print(string.format(
-			"[PlayerProgressStore] %s menang level %d (%s) -> unlockedLevel=%d, highestEndless=%d",
-			player.Name, teleportData.levelPlayed, tostring(teleportData.mode),
-			progress.unlockedLevel, progress.highestEndless
-		))
+		print(
+			string.format(
+				"[PlayerProgressStore] %s menang level %d (%s) -> unlockedLevel=%d, highestEndless=%d",
+				player.Name,
+				teleportData.levelPlayed,
+				tostring(teleportData.mode),
+				progress.unlockedLevel,
+				progress.highestEndless
+			)
+		)
 	end
 
 	-- Simpan langsung begitu ada update dari hasil match (jangan tunggu

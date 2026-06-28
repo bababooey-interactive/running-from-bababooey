@@ -300,9 +300,13 @@ local function setupPrompt(model)
 		return -- stop di sini, boulder tidak perlu flow category di bawah
 	end
 
-	-- ADD: Lever branch
 	local taskType = model:GetAttribute("TaskType")
 	if taskType == "lever" then
+		-- If already completed (e.g. streaming in late or already pulled), don't show prompt
+		if model:GetAttribute("Completed") then
+			return
+		end
+
 		local targetPart = getPrimaryOrFirstPart(model)
 		if not targetPart then
 			return
@@ -319,10 +323,39 @@ local function setupPrompt(model)
 		prompt.ActionText = "Tarik"
 		prompt.ObjectText = "🔧 Lever"
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
-		prompt.HoldDuration = 0.8 -- slight hold so it feels intentional
+		prompt.HoldDuration = 0.8
 		prompt.MaxActivationDistance = 5
 		prompt.RequiresLineOfSight = false
 		prompt.Parent = targetPart
+
+		-- LISTEN FOR COMPLETED ATTRIBUTE: If another player completes it, destroy this prompt immediately
+		local attrConnection
+		attrConnection = model:GetAttributeChangedSignal("Completed"):Connect(function()
+			if model:GetAttribute("Completed") then
+				-- Destroy the prompt we just made
+				prompt.Enabled = false
+				prompt:Destroy()
+
+				-- Also aggressively destroy ANY other prompts that might have snuck in
+				for _, child in ipairs(targetPart:GetChildren()) do
+					if child:IsA("ProximityPrompt") then
+						child:Destroy()
+					end
+				end
+
+				if attrConnection then
+					attrConnection:Disconnect()
+					attrConnection = nil
+				end
+			end
+		end)
+
+		-- [CRITICAL FIX] If it's ALREADY completed when we are setting it up (e.g., late joiners),
+		-- destroy it instantly and exit.
+		if model:GetAttribute("Completed") then
+			prompt:Destroy()
+			return
+		end
 
 		prompt.Triggered:Connect(function()
 			-- Fire to server (TaskSystem handles the actual completion)
@@ -333,7 +366,7 @@ local function setupPrompt(model)
 					taskId = model:GetAttribute("TaskId") or "",
 				})
 			end
-			-- Disable prompt immediately so player can't pull again
+			-- Disable prompt immediately so local player can't click lock it
 			prompt.Enabled = false
 		end)
 
@@ -341,6 +374,10 @@ local function setupPrompt(model)
 		model.AncestryChanged:Connect(function()
 			if not model.Parent then
 				promptSetup[model] = nil
+				if attrConnection then
+					attrConnection:Disconnect()
+					attrConnection = nil
+				end
 			end
 		end)
 		return

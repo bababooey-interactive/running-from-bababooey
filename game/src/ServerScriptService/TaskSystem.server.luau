@@ -4,43 +4,44 @@
 --  Path: game/src/ServerScriptService/TaskSystem.server.luau
 -- =============================================================
 
-local Players        = game:GetService("Players")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService   = game:GetService("TweenService")
+local TweenService = game:GetService("TweenService")
 
-local Constants    = require(ReplicatedStorage.Shared.Constants)
+local Constants = require(ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
 
-local Remotes         = ReplicatedStorage:WaitForChild("Remotes")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE_TaskProgress = Remotes:WaitForChild("TaskProgress")
 local RE_TaskInteract = Remotes:WaitForChild("TaskInteract")
-local RE_GameWin      = Remotes:WaitForChild("GameWin")
-local RE_SyncState    = Remotes:WaitForChild("SyncState")
+local RE_GameWin = Remotes:WaitForChild("GameWin")
+local RE_SyncState = Remotes:WaitForChild("SyncState")
 
 -- ─────────────────────────────────────────────
 --  STATE — battery dihapus
 -- ─────────────────────────────────────────────
 local taskState = {
-	coal_done   = 0,
-	coal_total  = 0,
-	lever_done  = 0,
+	coal_done = 0,
+	coal_total = 0,
+	lever_done = 0,
 	lever_total = 0,
-	won         = false,
+	won = false,
 }
 
 local completedTasks: { [string]: boolean } = {}
+local taskObjectsCache: { [string]: Instance } = {}
 
 -- ─────────────────────────────────────────────
 --  INIT
 -- ─────────────────────────────────────────────
 local function initTaskCounts(level: number)
 	local extra = math.max(0, level - 1) * Constants.TASK_ADD_PER_LEVEL
-	taskState.coal_total  = Constants.TASK_COAL_COUNT  + extra
+	taskState.coal_total = Constants.TASK_COAL_COUNT + extra
 	taskState.lever_total = Constants.TASK_LEVER_COUNT + extra
-	taskState.coal_done   = 0
-	taskState.lever_done  = 0
-	taskState.won         = false
-	completedTasks        = {}
+	taskState.coal_done = 0
+	taskState.lever_done = 0
+	taskState.won = false
+	completedTasks = {}
 end
 
 -- ─────────────────────────────────────────────
@@ -48,9 +49,9 @@ end
 -- ─────────────────────────────────────────────
 local function broadcastProgress()
 	RE_TaskProgress:FireAllClients({
-		coal_done   = taskState.coal_done,
-		coal_total  = taskState.coal_total,
-		lever_done  = taskState.lever_done,
+		coal_done = taskState.coal_done,
+		coal_total = taskState.coal_total,
+		lever_done = taskState.lever_done,
 		lever_total = taskState.lever_total,
 	})
 end
@@ -59,10 +60,11 @@ end
 --  WIN CHECK — tanpa battery
 -- ─────────────────────────────────────────────
 local function checkWin()
-	if taskState.won then return end
+	if taskState.won then
+		return
+	end
 
-	if taskState.coal_done  >= taskState.coal_total and
-		taskState.lever_done >= taskState.lever_total then
+	if taskState.coal_done >= taskState.coal_total and taskState.lever_done >= taskState.lever_total then
 		taskState.won = true
 		print("[TaskSystem] WIN — semua task selesai!")
 		RE_GameWin:FireAllClients()
@@ -92,28 +94,34 @@ end
 -- ─────────────────────────────────────────────
 local function animateLever(leverModel: Model)
 	local base = leverModel:FindFirstChild("Lever_Base")
-	if not base or not base:IsA("BasePart") then return end
+	if not base or not base:IsA("BasePart") then
+		return
+	end
 
 	local handle = base:FindFirstChild("Lever_Handle")
-	local knob   = base:FindFirstChild("Lever_Knob")
-	if not handle or not handle:IsA("BasePart") then return end
+	local knob = base:FindFirstChild("Lever_Knob")
+	if not handle or not handle:IsA("BasePart") then
+		return
+	end
 
 	local weld = handle:FindFirstChildOfClass("WeldConstraint")
-	if weld then weld:Destroy() end
+	if weld then
+		weld:Destroy()
+	end
 
 	local initialHandlePivot = handle:GetPivot()
-	local initialKnobPivot   = (knob and knob:IsA("BasePart")) and knob:GetPivot() or nil
+	local initialKnobPivot = (knob and knob:IsA("BasePart")) and knob:GetPivot() or nil
 
-	local pivotPos     = initialHandlePivot.Position
+	local pivotPos = initialHandlePivot.Position
 	local rotationAxis = base.CFrame.RightVector
-	local startAngle   = -45
-	local endAngle     = 45
+	local startAngle = -45
+	local endAngle = 45
 
 	SoundManager.leverPull(base.Position)
 
-	local angleValue       = Instance.new("NumberValue")
-	angleValue.Value       = startAngle
-	angleValue.Parent      = leverModel
+	local angleValue = Instance.new("NumberValue")
+	angleValue.Value = startAngle
+	angleValue.Parent = leverModel
 
 	local tween = TweenService:Create(
 		angleValue,
@@ -122,8 +130,8 @@ local function animateLever(leverModel: Model)
 	)
 
 	angleValue.Changed:Connect(function(angle)
-		local deltaAngle  = math.rad(angle - startAngle)
-		local rotationCF  = CFrame.fromAxisAngle(rotationAxis, deltaAngle)
+		local deltaAngle = math.rad(angle - startAngle)
+		local rotationCF = CFrame.fromAxisAngle(rotationAxis, deltaAngle)
 		local newHandlePivot = rotationCF * (initialHandlePivot - pivotPos) + pivotPos
 		handle:PivotTo(newHandlePivot)
 		if initialKnobPivot and knob and knob.Parent then
@@ -132,10 +140,14 @@ local function animateLever(leverModel: Model)
 	end)
 
 	tween:Play()
-	tween.Completed:Connect(function() angleValue:Destroy() end)
+	tween.Completed:Connect(function()
+		angleValue:Destroy()
+	end)
 
 	for _, desc in leverModel:GetDescendants() do
-		if desc:IsA("ProximityPrompt") then desc.Enabled = false end
+		if desc:IsA("ProximityPrompt") then
+			desc.Enabled = false
+		end
 	end
 end
 
@@ -148,42 +160,70 @@ end
 --  Signature: (taskType, taskId, player) — sama di dua tempat
 -- ─────────────────────────────────────────────
 local function completeTask(taskType: string, taskId: string, player: Player)
-	if taskState.won then return end
-	if completedTasks[taskId] then return end
+	if taskState.won then
+		return
+	end
+	if completedTasks[taskId] then
+		return
+	end
 
 	local char = player.Character
-	if not char then return end
+	if not char then
+		return
+	end
 	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hum or hum.Health <= 0 then return end
+	if not hum or hum.Health <= 0 then
+		return
+	end
 
 	if taskType == "coal" and taskState.coal_done < taskState.coal_total then
 		completedTasks[taskId] = true
-		taskState.coal_done   += 1
-		print(string.format("[TaskSystem] Coal %d/%d — oleh %s",
-			taskState.coal_done, taskState.coal_total, player.Name))
-
+		taskState.coal_done += 1
+		print(
+			string.format("[TaskSystem] Coal %d/%d — oleh %s", taskState.coal_done, taskState.coal_total, player.Name)
+		)
 	elseif taskType == "lever" and taskState.lever_done < taskState.lever_total then
 		completedTasks[taskId] = true
-		taskState.lever_done  += 1
-		print(string.format("[TaskSystem] Lever %d/%d — oleh %s",
-			taskState.lever_done, taskState.lever_total, player.Name))
+		taskState.lever_done += 1
+		print(
+			string.format(
+				"[TaskSystem] Lever %d/%d — oleh %s",
+				taskState.lever_done,
+				taskState.lever_total,
+				player.Name
+			)
+		)
 
-		-- Animasi lever dari server (replicate ke semua client)
+		-- FIX: Set attribute so all clients can replicate the completion state instantly
 		local leverModel = findLeverModel(taskId)
-		if leverModel then animateLever(leverModel) end
+		if leverModel then
+			leverModel:SetAttribute("Completed", true)
+			animateLever(leverModel)
+		end
 	else
 		return
+	end
+	local taskObj = taskObjectsCache[taskId]
+	if taskObj then
+		-- Tell clients to hide the prompt (covers coal deposits too!)
+		taskObj:SetAttribute("Completed", true)
+
+		-- Turn it green
+		if taskObj:IsA("BasePart") then
+			taskObj.BrickColor = BrickColor.new("Bright green")
+		end
 	end
 
 	broadcastProgress()
 	checkWin()
 end
-
 -- ─────────────────────────────────────────────
 --  HANDLER: RE_TaskInteract (lever dari ItemInteract.client)
 -- ─────────────────────────────────────────────
 RE_TaskInteract.OnServerEvent:Connect(function(player: Player, payload: { taskType: string, taskId: string })
-	if not payload or not payload.taskType or not payload.taskId then return end
+	if not payload or not payload.taskType or not payload.taskId then
+		return
+	end
 	completeTask(payload.taskType, payload.taskId, player)
 end)
 
@@ -192,11 +232,11 @@ end)
 -- ─────────────────────────────────────────────
 Players.PlayerAdded:Connect(function(player)
 	RE_SyncState:FireClient(player, {
-		coal_done   = taskState.coal_done,
-		coal_total  = taskState.coal_total,
-		lever_done  = taskState.lever_done,
+		coal_done = taskState.coal_done,
+		coal_total = taskState.coal_total,
+		lever_done = taskState.lever_done,
 		lever_total = taskState.lever_total,
-		won         = taskState.won,
+		won = taskState.won,
 	})
 end)
 
@@ -205,23 +245,28 @@ end)
 -- ─────────────────────────────────────────────
 local function hookTaskObject(obj: BasePart)
 	local taskType = obj:GetAttribute("TaskType")
-	local taskId   = obj:GetAttribute("TaskId")
-	if not taskType or not taskId then return end
+	local taskId = obj:GetAttribute("TaskId")
+	if not taskType or not taskId then
+		return
+	end
+	taskObjectsCache[taskId] = obj
 
-	task.spawn(function()
-		while not taskState.won do
-			task.wait(0.5)
-			if completedTasks[taskId] then
-				local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
-					or obj:FindFirstChild("ProximityPrompt", true)
-				if prompt then prompt.Enabled = false end
-				if obj:IsA("BasePart") then
-					obj.BrickColor = BrickColor.new("Bright green")
-				end
-				break
-			end
-		end
-	end)
+	-- task.spawn(function()
+	-- while not taskState.won do
+	-- 	task.wait(0.5)
+	-- 	if completedTasks[taskId] then
+	-- 		local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+	-- 			or obj:FindFirstChild("ProximityPrompt", true)
+	-- 		if prompt then
+	-- 			prompt.Enabled = false
+	-- 		end
+	-- 		if obj:IsA("BasePart") then
+	-- 			obj.BrickColor = BrickColor.new("Bright green")
+	-- 		end
+	-- 		break
+	-- 	end
+	-- end
+	-- end)
 end
 
 local function scanTaskObjects()
@@ -251,8 +296,14 @@ function TaskSystem.init(level: number)
 	initTaskCounts(level)
 	broadcastProgress()
 	scanTaskObjects()
-	print(string.format("[TaskSystem] Init level %d — Coal:%d Lever:%d",
-		level, taskState.coal_total, taskState.lever_total))
+	print(
+		string.format(
+			"[TaskSystem] Init level %d — Coal:%d Lever:%d",
+			level,
+			taskState.coal_total,
+			taskState.lever_total
+		)
+	)
 end
 
 function TaskSystem.getState()
