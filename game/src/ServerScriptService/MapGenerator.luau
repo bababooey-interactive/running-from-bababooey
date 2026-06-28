@@ -1007,19 +1007,19 @@ local function placeLeverObjects(taskFolder, placeableTiles, level, grid)
 
 		-- Kalau tidak ada dinding sama sekali (tile terbuka semua),
 		-- fallback ke lantai seperti sebelumnya
-		local leverCFrame
-		if wallDir then
-			local leverPos = basePos + wallOffset
+		--local leverCFrame
+		--if wallDir then
+			--local leverPos = basePos + wallOffset
 			-- Rotasi menghadap ke dalam (kebalikan arah dinding)
-			local facingAngle = math.rad(wallDir.rotation + 180)
+			--local facingAngle = math.rad(wallDir.rotation + 180)
 			-- Miringkan 90 derajat di sumbu X supaya tuas menghadap keluar dinding
-			leverCFrame = CFrame.new(leverPos)
-				* CFrame.Angles(0, facingAngle, 0)
-				* CFrame.Angles(math.rad(-90), 0, 0)
-		else
+			--leverCFrame = CFrame.new(leverPos)
+			--	* CFrame.Angles(0, facingAngle, 0)
+			--	* CFrame.Angles(math.rad(-90), 0, 0)
+		--else
 			leverCFrame = CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
 				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0)
-		end
+		--end
 
 		local clone = cloneAsset(LeverAsset, taskFolder, leverCFrame, LEVER_SCALE, true)
 
