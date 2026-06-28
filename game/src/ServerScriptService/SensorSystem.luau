@@ -29,7 +29,7 @@ local SensorSystem = {}
 -- ─────────────────────────────────────────────
 
 local NOISE_LIFETIME = 1.2 -- seconds a noise event lives
-local LIGHT_RANGE_BONUS = 1.25 -- extend each PointLight's range by this factor for vision checks
+local LIGHT_RANGE_BONUS = 1.3 -- extend each PointLight's range by this factor for vision checks
 -- local SMELL_CHASE_THRESHOLD = 0.25 -- suspicion contribution cap per smell tick (used externally)
 local WORLD_NOISE_MERGE_DIST = 10 -- studs: merge anonymous noise events closer than this
 
@@ -404,7 +404,7 @@ function SensorSystem.GetAwarenessForPlayer(
 					if not blocked then
 						local inLight = SensorSystem.IsPlayerInLight(playerPos)
 						-- Dimly visible even in shadow (5 % factor); full factor in light
-						local lightFactor = inLight and 1 or 0.05
+						local lightFactor = inLight and 1 or 0.06
 						local contrib = (1 - dist / Constants.MONSTER_VISION_RANGE) * cosA * lightFactor
 						awareness = math.max(awareness, contrib)
 					end

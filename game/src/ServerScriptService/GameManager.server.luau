@@ -152,7 +152,7 @@ local function getSessionData(firstPlayer: Player) --: { level: number, rules: {
 	end
 
 	-- ── DEFAULT SESSION (untuk testing tanpa lobby) ──
-	local level = 1
+	local level = 6
 	return {
 		level = level,
 		rules = generateRulesForLevel(level),

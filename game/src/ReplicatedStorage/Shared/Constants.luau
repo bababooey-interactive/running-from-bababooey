@@ -124,12 +124,12 @@ Constants.MONSTER_SPEED_BASE = 12 -- studs/s di level 1
 Constants.MONSTER_SPEED_PER_LEVEL = 0.4 -- naik per level
 Constants.MONSTER_SPEED_MAX = 28 -- cap
 
-Constants.MONSTER_HEAR_RADIUS = 20 -- studs (base)
+Constants.MONSTER_HEAR_RADIUS = 25 -- studs (base)
 Constants.MONSTER_HEAR_PLUS_MUL = 2 -- multiplier dengan rule HEAR_PLUS
 
-Constants.MONSTER_SMELL_RADIUS = 15 -- studs (hanya aktif dengan rule)
-Constants.MONSTER_VISION_RANGE = 30 -- studs (hanya aktif dengan rule)
-Constants.MONSTER_VISION_ANGLE = 60 -- derajat (half-angle cone)
+Constants.MONSTER_SMELL_RADIUS = 19 -- studs (hanya aktif dengan rule)
+Constants.MONSTER_VISION_RANGE = 40 -- studs (hanya aktif dengan rule)
+Constants.MONSTER_VISION_ANGLE = 75 -- derajat (half-angle cone)
 
 Constants.MONSTER_REACH_BASE = 4 -- studs catch radius (default)
 Constants.MONSTER_REACH_BONUS = 10 -- studs TAMBAHAN dengan rule MONSTER_REACH

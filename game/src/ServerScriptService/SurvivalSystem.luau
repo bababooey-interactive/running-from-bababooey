@@ -14,6 +14,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
@@ -48,14 +49,18 @@ local activeRules: { [string]: boolean } = {}
 -- ─────────────────────────────────────────────
 --  Helpers
 -- ─────────────────────────────────────────────
-local function getState(player: Player): PlayerState?
+local function getState(
+	player: Player
+): PlayerState? -- LocalShadow: Variable 'player' shadows a global variable used at line 208
 	return playerStates[player.UserId]
 end
 
-local function getCharacterPos(character: Model): Vector3?
-	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	return hrp and hrp.Position or nil
-end
+-- local function getCharacterPos(
+-- 	character: Model
+-- ): Vector3? -- FunctionUnused: Function 'getCharacterPos' is never used; prefix with '_' to silence
+-- 	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+-- 	return hrp and hrp.Position or nil
+-- end
 
 local function killPlayer(player: Player, cause: string)
 	local state = getState(player)
@@ -77,47 +82,34 @@ local function killPlayer(player: Player, cause: string)
 end
 
 -- ─────────────────────────────────────────────
---  Darkness detection
---  DarkZone = BasePart with Attribute "IsDarkZone" = true
---  in the Workspace/DarkZones folder.
+--  Dynamic Darkness Detection (Inverse of Light Meter)
 -- ─────────────────────────────────────────────
-local darkZones: { BasePart } = {}
-
-local function refreshDarkZones()
-	darkZones = {}
-	local folder = workspace:FindFirstChild("DarkZones")
-	if not folder then
-		return
-	end
-	for _, obj in ipairs(folder:GetDescendants()) do
-		if obj:IsA("BasePart") and obj:GetAttribute("IsDarkZone") then
-			table.insert(darkZones, obj)
-		end
-	end
-end
-
 local function isInDark(character: Model): boolean
 	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not hrp then
 		return false
 	end
+
 	local pos = hrp.Position
-	for _, zone in ipairs(darkZones) do
-		local cf = zone.CFrame
-		local sz = zone.Size / 2
-		local rel = cf:PointToObjectSpace(pos)
-		if math.abs(rel.X) <= sz.X and math.abs(rel.Y) <= sz.Y and math.abs(rel.Z) <= sz.Z then
-			return true
+	for _, light in ipairs(CollectionService:GetTagged("MapLights")) do
+		if light:IsA("PointLight") and light.Enabled then
+			local part = light.Parent
+			if part and part:IsA("BasePart") then
+				local dist = (pos - part.Position).Magnitude
+				if dist <= light.Range then
+					return false -- Inside a light's range, NOT in dark
+				end
+			end
 		end
 	end
-	return false
+	return true -- No light touched them, IN DARK
 end
 
 -- ─────────────────────────────────────────────
 --  Hunger: client fires EatFood on item pickup
 -- ─────────────────────────────────────────────
 RE_EatFood.OnServerEvent:Connect(function(player: Player)
-	local state = getState(player)
+	local state = getState(player) -- LocalShadow: Variable 'state' shadows a global variable used at line 208
 	if not state or not state.alive then
 		return
 	end
@@ -133,7 +125,7 @@ end)
 -- ─────────────────────────────────────────────
 --  Main survival tick  (called roughly every second)
 -- ─────────────────────────────────────────────
-local function survivalTick(dt: number)
+local function survivalTick(dt: number) -- FunctionUnused: Function 'survivalTick' is never used; prefix with '_' to silence
 	for userId, state in pairs(playerStates) do
 		if not state.alive then
 			continue
@@ -178,7 +170,7 @@ local function survivalTick(dt: number)
 
 		-- ── DARKNESS TIMER ──────────────────────────────────────
 		if activeRules[Constants.Rules.PLAYER_DARK_TIMER] then
-			local inDark = isInDark(character)
+			local inDark = isInDark(character) -- LocalShadow: Variable 'inDark' shadows a global variable used at line 208
 
 			-- Detect dark zone entry (first tick the player is inside)
 			if inDark and not state.prevInDark then
@@ -210,8 +202,8 @@ local function survivalTick(dt: number)
 					RE_PlayClientSound:FireClient(player, SoundManager.Ids.DarkWarning, 0.9)
 				end
 			else
-				-- Fully restore timer when back in light
-				state.darkTimer = Constants.DARK_TIMER_MAX
+				-- Recover timer slowly when back in light (e.g., recovers 1.5x as fast as it drains)
+				state.darkTimer = math.min(Constants.DARK_TIMER_MAX, state.darkTimer + (dt * 1.5))
 			end
 
 			RE_DarkUpdate:FireClient(player, state.darkTimer, inDark)
@@ -314,8 +306,6 @@ function SurvivalSystem.init(rules: { string })
 			state.hungerAt10 = false
 		end
 	end
-
-	refreshDarkZones()
 
 	if tickConnection then
 		tickConnection:Disconnect()

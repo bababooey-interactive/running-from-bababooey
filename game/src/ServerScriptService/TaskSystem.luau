@@ -6,56 +6,46 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
--- local RunService     = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local SoundManager = require(script.Parent.SoundManager)
-local SensorSystem = require(script.Parent.SensorSystem)
 
--- ─────────────────────────────────────────────
---  RemoteEvents  (buat folder Remotes di ReplicatedStorage)
--- ─────────────────────────────────────────────
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-
-local RE_TaskProgress = Remotes:WaitForChild("TaskProgress") -- server→all clients
-local RE_TaskInteract = Remotes:WaitForChild("TaskInteract") -- client→server (touch/prompt)
-local RE_GameWin = Remotes:WaitForChild("GameWin") -- server→all clients
-local RE_SyncState = Remotes:WaitForChild("SyncState") -- server→joining client
+local RE_TaskProgress = Remotes:WaitForChild("TaskProgress")
+local RE_TaskInteract = Remotes:WaitForChild("TaskInteract")
+local RE_GameWin = Remotes:WaitForChild("GameWin")
+local RE_SyncState = Remotes:WaitForChild("SyncState")
 
 -- ─────────────────────────────────────────────
---  Shared state  (counters dikelola server saja)
+--  STATE — battery dihapus
 -- ─────────────────────────────────────────────
 local taskState = {
 	coal_done = 0,
 	coal_total = 0,
 	lever_done = 0,
 	lever_total = 0,
-	--battery_done  = 0,
-	battery_total = 0,
 	won = false,
 }
 
--- Track which task objects sudah selesai (by object StringValue name / id)
 local completedTasks: { [string]: boolean } = {}
+local taskObjectsCache: { [string]: Instance } = {}
 
 -- ─────────────────────────────────────────────
---  Init: hitung totals berdasarkan level
+--  INIT
 -- ─────────────────────────────────────────────
 local function initTaskCounts(level: number)
 	local extra = math.max(0, level - 1) * Constants.TASK_ADD_PER_LEVEL
 	taskState.coal_total = Constants.TASK_COAL_COUNT + extra
 	taskState.lever_total = Constants.TASK_LEVER_COUNT + extra
-	--taskState.battery_total = Constants.TASK_BATTERY_COUNT + extra
 	taskState.coal_done = 0
 	taskState.lever_done = 0
-	--taskState.battery_done  = 0
 	taskState.won = false
 	completedTasks = {}
 end
 
 -- ─────────────────────────────────────────────
---  Broadcast progress ke semua player
+--  BROADCAST — tanpa battery
 -- ─────────────────────────────────────────────
 local function broadcastProgress()
 	RE_TaskProgress:FireAllClients({
@@ -63,39 +53,32 @@ local function broadcastProgress()
 		coal_total = taskState.coal_total,
 		lever_done = taskState.lever_done,
 		lever_total = taskState.lever_total,
-		--battery_done  = taskState.battery_done,
-		--battery_total = taskState.battery_total,
 	})
 end
 
 -- ─────────────────────────────────────────────
---  Win condition check
+--  WIN CHECK — tanpa battery
 -- ─────────────────────────────────────────────
 local function checkWin()
 	if taskState.won then
 		return
 	end
 
-	local allDone = taskState.coal_done >= taskState.coal_total and taskState.lever_done >= taskState.lever_total
-	--taskState.battery_done >= taskState.battery_total
-
-	if allDone then
+	if taskState.coal_done >= taskState.coal_total and taskState.lever_done >= taskState.lever_total then
 		taskState.won = true
 		print("[TaskSystem] WIN — semua task selesai!")
 		RE_GameWin:FireAllClients()
 
-		-- Delay sebentar sebelum teleport ke lobby
 		task.delay(5, function()
 			for _, player in ipairs(Players:GetPlayers()) do
-				local teleportService = game:GetService("TeleportService")
-				teleportService:Teleport(Constants.LOBBY_PLACE_ID, player)
+				game:GetService("TeleportService"):Teleport(Constants.LOBBY_PLACE_ID, player)
 			end
 		end)
 	end
 end
 
 -- ─────────────────────────────────────────────
---  Find lever model in workspace by TaskId
+--  LEVER: cari model di workspace by TaskId
 -- ─────────────────────────────────────────────
 local function findLeverModel(taskId: string): Model?
 	for _, descendant in workspace:GetDescendants() do
@@ -107,7 +90,7 @@ local function findLeverModel(taskId: string): Model?
 end
 
 -- ─────────────────────────────────────────────
---  Animate lever pull (rotate handle + knob)
+--  LEVER: animasi handle rotate
 -- ─────────────────────────────────────────────
 local function animateLever(leverModel: Model)
 	local base = leverModel:FindFirstChild("Lever_Base")
@@ -121,48 +104,38 @@ local function animateLever(leverModel: Model)
 		return
 	end
 
-	-- Remove WeldConstraint so we can animate freely
 	local weld = handle:FindFirstChildOfClass("WeldConstraint")
 	if weld then
 		weld:Destroy()
 	end
 
-	-- Store initial pivot CFrames before any rotation
 	local initialHandlePivot = handle:GetPivot()
 	local initialKnobPivot = (knob and knob:IsA("BasePart")) and knob:GetPivot() or nil
 
-	-- Rotation center = handle pivot point (bottom of handle = hinge)
 	local pivotPos = initialHandlePivot.Position
-	-- Rotation axis = base's local X axis in world space
 	local rotationAxis = base.CFrame.RightVector
-
-	-- Lever starts at -45° (up), animates to +45° (down) = 90° total
 	local startAngle = -45
 	local endAngle = 45
 
-	-- Play lever sound at the base position
 	SoundManager.leverPull(base.Position)
 
-	-- Drive animation with a NumberValue so TweenService can tween it
 	local angleValue = Instance.new("NumberValue")
 	angleValue.Value = startAngle
 	angleValue.Parent = leverModel
 
-	local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	local tween = TweenService:Create(angleValue, tweenInfo, { Value = endAngle })
+	local tween = TweenService:Create(
+		angleValue,
+		TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Value = endAngle }
+	)
 
 	angleValue.Changed:Connect(function(angle)
 		local deltaAngle = math.rad(angle - startAngle)
 		local rotationCF = CFrame.fromAxisAngle(rotationAxis, deltaAngle)
-
-		-- Rotate handle around the hinge pivot point
 		local newHandlePivot = rotationCF * (initialHandlePivot - pivotPos) + pivotPos
 		handle:PivotTo(newHandlePivot)
-
-		-- Rotate knob around the same hinge pivot point
 		if initialKnobPivot and knob and knob.Parent then
-			local newKnobPivot = rotationCF * (initialKnobPivot - pivotPos) + pivotPos
-			knob:PivotTo(newKnobPivot)
+			knob:PivotTo(rotationCF * (initialKnobPivot - pivotPos) + pivotPos)
 		end
 	end)
 
@@ -171,7 +144,6 @@ local function animateLever(leverModel: Model)
 		angleValue:Destroy()
 	end)
 
-	-- Disable ProximityPrompt so it can't be pulled again
 	for _, desc in leverModel:GetDescendants() do
 		if desc:IsA("ProximityPrompt") then
 			desc.Enabled = false
@@ -180,36 +152,30 @@ local function animateLever(leverModel: Model)
 end
 
 -- ─────────────────────────────────────────────
---  Handle task interaction dari client
---  payload = { taskType: string, taskId: string }
+--  CORE: completeTask
+--  Dipanggil dari:
+--  1. RE_TaskInteract handler (lever dari ItemInteract.client)
+--  2. ItemPickup.server.luau langsung via require (coal deposit)
+--
+--  Signature: (taskType, taskId, player) — sama di dua tempat
 -- ─────────────────────────────────────────────
-local function onTaskInteract(player: Player, payload: { taskType: string, taskId: string })
+local function completeTask(taskType: string, taskId: string, player: Player)
 	if taskState.won then
 		return
 	end
-	if not payload or not payload.taskType or not payload.taskId then
-		return
-	end
-
-	local taskType = payload.taskType -- "coal" | "lever" | "battery"
-	local taskId = payload.taskId -- unique identifier for tiap task object
-
-	-- Hindari double-complete
 	if completedTasks[taskId] then
 		return
 	end
 
-	-- Validasi player masih hidup
-	local character = player.Character
-	if not character then
+	local char = player.Character
+	if not char then
 		return
 	end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then
 		return
 	end
 
-	-- Update counter sesuai type
 	if taskType == "coal" and taskState.coal_done < taskState.coal_total then
 		completedTasks[taskId] = true
 		taskState.coal_done += 1
@@ -228,55 +194,54 @@ local function onTaskInteract(player: Player, payload: { taskType: string, taskI
 			)
 		)
 
-		-- Animate the lever rotation
+		-- FIX: Set attribute so all clients can replicate the completion state instantly
 		local leverModel = findLeverModel(taskId)
 		if leverModel then
+			leverModel:SetAttribute("Completed", true)
 			animateLever(leverModel)
-
-			-- Area noise: all players near the lever hear it — closer = louder noise bar
-			local leverBase = leverModel:FindFirstChild("Lever_Base")
-			if leverBase and leverBase:IsA("BasePart") then
-				SensorSystem.AddAreaNoise(leverBase.Position, 1.0, 50)
-				SensorSystem.AddWorldNoise(leverBase.Position, 1.0)
-			end
 		end
-
-	--elseif taskType == "battery" and taskState.battery_done < taskState.battery_total then
-	--    completedTasks[taskId] = true
-	--    taskState.battery_done += 1
-	--    print(string.format("[TaskSystem] Battery %d/%d — oleh %s", taskState.battery_done, taskState.battery_total, player.Name))
 	else
-		return -- type tidak dikenal / sudah penuh
+		return
+	end
+	local taskObj = taskObjectsCache[taskId]
+	if taskObj then
+		-- Tell clients to hide the prompt (covers coal deposits too!)
+		taskObj:SetAttribute("Completed", true)
+
+		-- Turn it green
+		if taskObj:IsA("BasePart") then
+			taskObj.BrickColor = BrickColor.new("Bright green")
+		end
 	end
 
 	broadcastProgress()
 	checkWin()
 end
-
-RE_TaskInteract.OnServerEvent:Connect(onTaskInteract)
+-- ─────────────────────────────────────────────
+--  HANDLER: RE_TaskInteract (lever dari ItemInteract.client)
+-- ─────────────────────────────────────────────
+RE_TaskInteract.OnServerEvent:Connect(function(player: Player, payload: { taskType: string, taskId: string })
+	if not payload or not payload.taskType or not payload.taskId then
+		return
+	end
+	completeTask(payload.taskType, payload.taskId, player)
+end)
 
 -- ─────────────────────────────────────────────
---  Sync state ke player yang baru join (late-join)
+--  LATE-JOIN SYNC — tanpa battery
 -- ─────────────────────────────────────────────
 Players.PlayerAdded:Connect(function(player)
-	-- Kirim state sekarang ke player ini saja
 	RE_SyncState:FireClient(player, {
 		coal_done = taskState.coal_done,
 		coal_total = taskState.coal_total,
 		lever_done = taskState.lever_done,
 		lever_total = taskState.lever_total,
-		--battery_done  = taskState.battery_done,
-		--battery_total = taskState.battery_total,
 		won = taskState.won,
 	})
 end)
 
 -- ─────────────────────────────────────────────
---  Setup ProximityPrompts dari Workspace task objects
---  Konvensi: setiap task object punya:
---    - Attribute "TaskType"  = "coal" | "lever" | "battery"
---    - Attribute "TaskId"    = unique string (misal: "Coal_01")
---    - Child ProximityPrompt (sudah dipasang di Studio)
+--  HOOK TASK OBJECTS (disable prompt saat selesai)
 -- ─────────────────────────────────────────────
 local function hookTaskObject(obj: BasePart)
 	local taskType = obj:GetAttribute("TaskType")
@@ -284,61 +249,37 @@ local function hookTaskObject(obj: BasePart)
 	if not taskType or not taskId then
 		return
 	end
+	taskObjectsCache[taskId] = obj
 
-	local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
-	if not prompt then
-		-- Auto-create prompt jika belum ada
-		prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText = taskType:sub(1, 1):upper() .. taskType:sub(2) -- capitalize
-		prompt.ObjectText = taskId
-		prompt.HoldDuration = 1.5
-		prompt.MaxActivationDistance = 8
-		prompt.Parent = obj
-	end
-
-	prompt.Triggered:Connect(function(player: Player)
-		-- Client juga bisa trigger langsung via server-side event ini
-		onTaskInteract(player, { taskType = taskType, taskId = taskId })
-	end)
-
-	-- Disable prompt jika sudah selesai (hook buat completed-tasks)
-	local function refreshPrompt()
-		if completedTasks[taskId] then
-			prompt.Enabled = false
-			-- Visual feedback: ganti warna part
-			if obj:IsA("BasePart") then
-				obj.BrickColor = BrickColor.new("Bright green")
-			end
-		end
-	end
-
-	-- Poll setiap 0.5 detik (ringan)
-	task.spawn(function()
-		while not taskState.won do
-			refreshPrompt()
-			task.wait(0.5)
-		end
-	end)
+	-- task.spawn(function()
+	-- while not taskState.won do
+	-- 	task.wait(0.5)
+	-- 	if completedTasks[taskId] then
+	-- 		local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+	-- 			or obj:FindFirstChild("ProximityPrompt", true)
+	-- 		if prompt then
+	-- 			prompt.Enabled = false
+	-- 		end
+	-- 		if obj:IsA("BasePart") then
+	-- 			obj.BrickColor = BrickColor.new("Bright green")
+	-- 		end
+	-- 		break
+	-- 	end
+	-- end
+	-- end)
 end
 
--- ─────────────────────────────────────────────
---  Scan Workspace untuk task objects
--- ─────────────────────────────────────────────
 local function scanTaskObjects()
-	-- Cari di folder TaskObjects (buat folder ini di Workspace)
 	local taskFolder = workspace:WaitForChild("TaskObjects", 10)
 	if not taskFolder then
-		warn("[TaskSystem] Folder 'TaskObjects' tidak ditemukan di Workspace!")
+		warn("[TaskSystem] Folder 'TaskObjects' tidak ditemukan!")
 		return
 	end
-
 	for _, obj in ipairs(taskFolder:GetDescendants()) do
 		if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
 		end
 	end
-
-	-- Watch for dynamically added task objects
 	taskFolder.DescendantAdded:Connect(function(obj)
 		if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
@@ -347,7 +288,7 @@ local function scanTaskObjects()
 end
 
 -- ─────────────────────────────────────────────
---  Public API (dipanggil oleh GameManager)
+--  PUBLIC API
 -- ─────────────────────────────────────────────
 local TaskSystem = {}
 
@@ -357,11 +298,10 @@ function TaskSystem.init(level: number)
 	scanTaskObjects()
 	print(
 		string.format(
-			"[TaskSystem] Init level %d — Coal:%d Lever:%d Battery:%d",
+			"[TaskSystem] Init level %d — Coal:%d Lever:%d",
 			level,
 			taskState.coal_total,
-			taskState.lever_total,
-			taskState.battery_total
+			taskState.lever_total
 		)
 	)
 end
@@ -370,39 +310,9 @@ function TaskSystem.getState()
 	return taskState
 end
 
+-- Dipanggil oleh ItemPickup.server.luau untuk coal deposit
 function TaskSystem.completeTask(taskType: string, taskId: string, player: Player)
-	if taskState.won then
-		return
-	end
-
-	-- Guard: jangan double-complete
-	if completedTasks[taskId] then
-		return
-	end
-
-	if taskType == "coal" and taskState.coal_done < taskState.coal_total then
-		completedTasks[taskId] = true
-		taskState.coal_done += 1
-		print(
-			string.format("[TaskSystem] Coal %d/%d — oleh %s", taskState.coal_done, taskState.coal_total, player.Name)
-		)
-	elseif taskType == "lever" and taskState.lever_done < taskState.lever_total then
-		completedTasks[taskId] = true
-		taskState.lever_done += 1
-		print(
-			string.format(
-				"[TaskSystem] Lever %d/%d — oleh %s",
-				taskState.lever_done,
-				taskState.lever_total,
-				player.Name
-			)
-		)
-	else
-		return -- type tidak dikenal atau sudah penuh
-	end
-
-	broadcastProgress()
-	checkWin()
+	completeTask(taskType, taskId, player)
 end
 
 return TaskSystem
