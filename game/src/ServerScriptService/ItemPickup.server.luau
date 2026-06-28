@@ -37,12 +37,13 @@ local THROWABLE_BOULDER_NAMES = {
 	boulder_small = true,
 	boulder_medium = true,
 }
--- Offset dekat tangan agar item tidak mengambang
-local CARRY_WELD_OFFSET = CFrame.new(0, -0.05, -0.35) * CFrame.Angles(math.rad(-20), 0, 0)
--- Meat: pegang tulang (Handle), rotasi 90° di Y agar sumbu panjang X menghadap -Z (lurus ke depan)
-local MEAT_WELD_OFFSET = CFrame.new(0, -0.05, -0.35) * CFrame.Angles(0, math.rad(90), 0)
--- Water bottle: sedikit lebih rendah dan tegak
-local BOTTLE_WELD_OFFSET = CFrame.new(0, -0.1, -0.35) * CFrame.Angles(math.rad(-10), 0, 0)
+local CARRY_WELD_OFFSET_DEFAULT = CFrame.new(0, -0.1, -0.6) * CFrame.Angles(math.rad(-15), math.rad(10), 0)
+-- Per-item carry offsets (applied on top of hand CFrame)
+local CARRY_WELD_OFFSETS = {
+	-- Meat: Handle is a long horizontal bone; rotate -90° on Y so the
+	-- bone points forward and Meat_Body hangs in front of the player.
+	meat = CFrame.new(0, -0.1, -0.6) * CFrame.Angles(math.rad(-15), math.rad(-90), 0),
+}
 
 -- ── State ──────────────────────────────────────────────────────
 local heldItems = {}
@@ -109,30 +110,33 @@ local function isWaterItem(modelName: string): boolean
 	return modelName:lower():find("water") ~= nil
 end
 
--- Cari Handle part dari Tool di dalam food model
-local function getHandlePart(itemModel)
-	if itemModel:IsA("Model") then
-		for _, child in ipairs(itemModel:GetChildren()) do
-			if child:IsA("Tool") then
-				local handle = child:FindFirstChild("Handle")
-				if handle and handle:IsA("BasePart") then
-					return handle
-				end
+local function getMainPart(model)
+	if model:IsA("BasePart") then
+		return model
+	end
+	if not model:IsA("Model") then
+		return nil
+	end
+	-- Prefer the part named "Handle" — this is the Tool grip point
+	-- (e.g. the bone on meat, the body on carrot/waterbottle)
+	local handlePart = model:FindFirstChild("Handle", true)
+	if handlePart and handlePart:IsA("BasePart") then
+		return handlePart
+	end
+	-- Fallback: largest part by volume
+	local largest = nil
+	local largestVolume = 0
+	for _, desc in ipairs(model:GetDescendants()) do
+		if desc:IsA("BasePart") then
+			local s = desc.Size
+			local vol = s.X * s.Y * s.Z
+			if vol > largestVolume then
+				largest = desc
+				largestVolume = vol
 			end
 		end
 	end
-	return nil
-end
-
--- Tentukan offset berdasarkan jenis item
-local function getCarryOffset(itemModel)
-	local name = itemModel.Name:lower()
-	if name:find("meat") then
-		return MEAT_WELD_OFFSET
-	elseif name:find("water") or name:find("bottle") then
-		return BOTTLE_WELD_OFFSET
-	end
-	return CARRY_WELD_OFFSET
+	return largest
 end
 
 local function weldItemToHand(character, itemModel)
@@ -141,29 +145,35 @@ local function weldItemToHand(character, itemModel)
 		return nil
 	end
 
-	-- Untuk food items, pakai Handle dari Tool; untuk lainnya pakai primary/first part
-	local itemPart = getHandlePart(itemModel) or getPrimaryOrFirstPart(itemModel)
+	-- Use the largest part as the main grip point so the item sits
+	-- properly in the hand (not floating off to the side).
+	local itemPart = getMainPart(itemModel)
 	if not itemPart then
 		return nil
 	end
 
-	-- Offset per jenis item
-	local carryOffset = getCarryOffset(itemModel)
-
+	-- Disable any scripts inside Tools to prevent them from interfering
+	-- with collision/weld settings after pickup
 	for _, desc in ipairs(itemModel:GetDescendants()) do
 		if desc:IsA("BasePart") then
 			desc.Anchored = false
 			desc.CanCollide = false
+		elseif (desc:IsA("Script") or desc:IsA("LocalScript")) and desc ~= script then
+			desc.Disabled = true
 		end
 	end
 	itemPart.Anchored = false
 	itemPart.CanCollide = false
 
-	-- Posisikan model berdasarkan itemPart (Handle), bukan pivot model
-	-- Hitung offset relatif dari itemPart ke pivot, lalu PivotTo sehingga
-	-- itemPart berada di hand.CFrame * carryOffset
-	local relativeOffset = itemPart.CFrame:ToObjectSpace(itemModel:GetPivot())
-	itemModel:PivotTo((hand.CFrame * carryOffset) * relativeOffset)
+	-- Set PrimaryPart to the main part so PivotTo positions correctly.
+	if itemModel:IsA("Model") and not itemModel.PrimaryPart then
+		itemModel.PrimaryPart = itemPart
+	end
+
+	local itemName = itemModel.Name:lower()
+	local carryOffset = CARRY_WELD_OFFSETS[itemName] or CARRY_WELD_OFFSET_DEFAULT
+
+	itemModel:PivotTo(hand.CFrame * carryOffset)
 
 	local weld = Instance.new("WeldConstraint")
 	weld.Name = "CarryWeld"
@@ -242,6 +252,12 @@ local function pickupItem(player, itemModel)
 	end
 	if heldItems[player] then
 		return false, "already_holding"
+	end
+
+	-- Unequip any Roblox Tools (e.g., lantern) so player can only hold one item
+	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:UnequipTools()
 	end
 
 	local category
@@ -554,7 +570,21 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 end)
 
-Players.PlayerAdded:Connect(function(player)
+local function setupPlayer(player)
+	local function onCharacterAdded(character)
+		-- Drop any held ItemPickup item when player equips a Tool (e.g., lantern)
+		character.ChildAdded:Connect(function(child)
+			if child:IsA("Tool") and heldItems[player] then
+				dropItem(player)
+			end
+		end)
+	end
+
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+	player.CharacterAdded:Connect(onCharacterAdded)
+
 	player.CharacterRemoving:Connect(function()
 		local data = heldItems[player]
 		if data then
@@ -566,6 +596,11 @@ Players.PlayerAdded:Connect(function(player)
 			RE_HeldItemChanged:FireAllClients(player, nil, nil)
 		end
 	end)
-end)
+end
+
+Players.PlayerAdded:Connect(setupPlayer)
+for _, player in Players:GetPlayers() do
+	setupPlayer(player)
+end
 
 print("[ItemPickup] Server initialized.")
