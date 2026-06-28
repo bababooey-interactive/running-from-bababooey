@@ -456,9 +456,9 @@ function MonsterBrain:_beginStrike(player: Player)
 			if hum then
 				hum.Health = 0
 			end
-			if self.onDied then
-				self.onDied(player.Name)
-			end
+			-- if self.onDied then
+			-- 	self.onDied(player.Name)
+			-- end
 			task.delay(2, function()
 				self:_beginIdle()
 			end)
@@ -549,7 +549,9 @@ function MonsterBrain:_tick(dt: number)
 		-- Escalate to chase if any player's suspicion exceeds the threshold
 		local highestPlayer, highestLevel = nil, 0
 		for p, level in pairs(self.suspicion) do
-			if level >= SUSPICION_CHASE_THRESHOLD and level > highestLevel then
+			local pChar = p.Character
+			local pHum = pChar and pChar:FindFirstChildOfClass("Humanoid")
+			if pHum and pHum.Health > 0 and level >= SUSPICION_CHASE_THRESHOLD and level > highestLevel then
 				highestLevel = level
 				highestPlayer = p
 			end
@@ -789,6 +791,13 @@ function MonsterBrain:_handleMovement(dt: number, monPos: Vector3)
 			else
 				self:_beginIdle()
 			end
+			return
+		end
+		-- Stop chasing dead/downed targets
+		local targetHum = char:FindFirstChildOfClass("Humanoid")
+		if not targetHum or targetHum.Health <= 0 then
+			self.chaseTarget = nil
+			self:_beginIdle()
 			return
 		end
 

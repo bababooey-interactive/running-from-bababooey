@@ -16,23 +16,23 @@
 --  RE_GameOver       server→all   : (sudah ada di RemoteSetup)
 -- =============================================================
 
-local Players           = game:GetService("Players")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService      = game:GetService("TweenService")
+-- local TweenService      = game:GetService("TweenService")
 
 local Constants = require(ReplicatedStorage.Shared.Constants)
 
-local Remotes          = ReplicatedStorage:WaitForChild("Remotes")
-local RE_PlayerDowned  = Remotes:WaitForChild("PlayerDowned")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_PlayerDowned = Remotes:WaitForChild("PlayerDowned")
 local RE_PlayerRevived = Remotes:WaitForChild("PlayerRevived")
-local RE_GameOver      = Remotes:WaitForChild("GameOver")
+local RE_GameOver = Remotes:WaitForChild("GameOver")
 
 -- ─────────────────────────────────────────────
 --  CONFIG
 -- ─────────────────────────────────────────────
-local REVIVE_COUNTDOWN  = Constants.REVIVE_TIMER or 60   -- detik sebelum permanent dead
-local REVIVE_HOLD       = 5                               -- detik hold prompt
-local PROMPT_DISTANCE   = 8                               -- stud max aktivasi prompt
+local REVIVE_COUNTDOWN = Constants.REVIVE_TIMER or 60 -- detik sebelum permanent dead
+local REVIVE_HOLD = 5 -- detik hold prompt
+local PROMPT_DISTANCE = 8 -- stud max aktivasi prompt
 local GHOST_ANCHOR_NAME = "GhostAnchor"
 
 -- ─────────────────────────────────────────────
@@ -46,70 +46,79 @@ local GHOST_ANCHOR_NAME = "GhostAnchor"
 --   thread      : thread,           -- coroutine countdown
 --   permanent   : boolean,
 -- }
-local downedState: { [number]: {
-    player    : Player,
-    anchor    : BasePart,
-    prompt    : ProximityPrompt,
-    timeLeft  : number,
-    thread    : thread?,
-    permanent : boolean,
-} } = {}
+local downedState: {
+	[number]: {
+		player: Player,
+		anchor: BasePart,
+		prompt: ProximityPrompt,
+		timeLeft: number,
+		thread: thread?,
+		permanent: boolean,
+	},
+} =
+	{}
 
 -- ─────────────────────────────────────────────
 --  HELPER: semua player permanent dead?
 -- ─────────────────────────────────────────────
 local function checkGameOver()
-    local allPlayers = Players:GetPlayers()
-    if #allPlayers == 0 then return end
+	local allPlayers = Players:GetPlayers()
+	if #allPlayers == 0 then
+		return
+	end
 
-    for _, player in ipairs(allPlayers) do
-        local state = downedState[player.UserId]
-        -- Kalau ada player yang TIDAK permanent dead = masih hidup/bisa diselamatkan
-        if not state or not state.permanent then
-            return
-        end
-    end
+	for _, player in ipairs(allPlayers) do
+		local state = downedState[player.UserId]
+		-- Kalau ada player yang TIDAK permanent dead = masih hidup/bisa diselamatkan
+		if not state or not state.permanent then
+			return
+		end
+	end
 
-    -- Semua permanent dead → Game Over
-    print("[ReviveSystem] Semua player permanent dead — GAME OVER")
-    RE_GameOver:FireAllClients()
+	-- Semua permanent dead → Game Over
+	print("[ReviveSystem] Semua player permanent dead — GAME OVER")
+	RE_GameOver:FireAllClients()
 end
 
 -- ─────────────────────────────────────────────
 --  CLEANUP anchor & prompt player tertentu
 -- ─────────────────────────────────────────────
 local function cleanupAnchor(userId: number)
-    local state = downedState[userId]
-    if not state then return end
+	local state = downedState[userId]
+	if not state then
+		return
+	end
 
-    if state.prompt and state.prompt.Parent then
-        state.prompt:Destroy()
-    end
-    if state.anchor and state.anchor.Parent then
-        state.anchor:Destroy()
-    end
+	if state.prompt and state.prompt.Parent then
+		state.prompt:Destroy()
+	end
+	if state.anchor and state.anchor.Parent then
+		state.anchor:Destroy()
+	end
 end
 
 -- ─────────────────────────────────────────────
 --  PERMANENT DEATH
 -- ─────────────────────────────────────────────
 local function makePermanentDead(userId: number)
-    local state = downedState[userId]
-    if not state or state.permanent then return end
+	local state = downedState[userId]
+	if not state or state.permanent then
+		return
+	end
 
-    state.permanent = true
-    cleanupAnchor(userId)
+	state.permanent = true
+	cleanupAnchor(userId)
 
-    print(string.format("[ReviveSystem] %s permanent dead.", state.player.Name))
+	print(string.format("[ReviveSystem] %s permanent dead.", state.player.Name))
 
-    -- Beritahu semua client
-    RE_PlayerDowned:FireAllClients({
-        playerName = state.player.Name,
-        timeLeft   = 0,
-        permanent  = true,
-    })
+	-- Beritahu semua client
+	RE_PlayerDowned:FireAllClients({
+		playerName = state.player.Name,
+		timeLeft = 0,
+		permanent = true,
+	})
 
-    checkGameOver()
+	checkGameOver()
 end
 
 -- ─────────────────────────────────────────────
@@ -117,216 +126,239 @@ end
 --  Part transparan di posisi mati sebagai adornee ProximityPrompt
 -- ─────────────────────────────────────────────
 local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, ProximityPrompt)
-    local anchor = Instance.new("Part")
-    anchor.Name        = GHOST_ANCHOR_NAME .. "_" .. player.Name
-    anchor.Size        = Vector3.new(2, 4, 2)
-    anchor.CFrame      = CFrame.new(position)
-    anchor.Anchored    = true
-    anchor.CanCollide  = false
-    anchor.CanQuery    = false
-    anchor.Transparency = 1
-    anchor.Parent      = workspace
+	local anchor = Instance.new("Part")
+	anchor.Name = GHOST_ANCHOR_NAME .. "_" .. player.Name
+	anchor.Size = Vector3.new(3, 4, 3)
 
-    -- Visual: glow putih untuk menandai posisi downed
-    local glow = Instance.new("SelectionBox")
-    glow.Adornee       = anchor
-    glow.Color3        = Color3.fromRGB(220, 220, 255)
-    glow.LineThickness = 0.04
-    glow.SurfaceTransparency = 0.6
-    glow.SurfaceColor3 = Color3.fromRGB(180, 180, 255)
-    glow.Parent        = anchor
+	-- Raise it by 2 studs so it sits ON the ground, not IN the ground
+	anchor.CFrame = CFrame.new(position + Vector3.new(0, 2, 0))
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
 
-    -- Billboard nama di atas anchor
-    local billboard = Instance.new("BillboardGui")
-    billboard.Size         = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset  = Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop  = false
-    billboard.Adornee      = anchor
-    billboard.Parent       = anchor
+	-- Make it an actual visible glowing blue hologram so it can't be missed
+	anchor.Transparency = 0.5
+	anchor.Material = Enum.Material.ForceField
+	anchor.Color = Color3.fromRGB(50, 150, 255)
+	anchor.Parent = workspace
 
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size                  = UDim2.new(1, 0, 0.6, 0)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.TextColor3            = Color3.fromRGB(220, 220, 255)
-    nameLabel.TextSize              = 16
-    nameLabel.Font                  = Enum.Font.GothamBold
-    nameLabel.Text                  = "💀 " .. player.Name
-    nameLabel.Parent                = billboard
+	-- Visual: glow putih
+	local glow = Instance.new("SelectionBox")
+	glow.Adornee = anchor
+	glow.Color3 = Color3.fromRGB(220, 220, 255)
+	glow.LineThickness = 0.05
+	glow.SurfaceTransparency = 0.8
+	glow.Parent = anchor
 
-    local timerLabel = Instance.new("TextLabel")
-    timerLabel.Name                  = "TimerLabel"
-    timerLabel.Size                  = UDim2.new(1, 0, 0.4, 0)
-    timerLabel.Position              = UDim2.new(0, 0, 0.6, 0)
-    timerLabel.BackgroundTransparency = 1
-    timerLabel.TextColor3            = Color3.fromRGB(255, 100, 100)
-    timerLabel.TextSize              = 13
-    timerLabel.Font                  = Enum.Font.Gotham
-    timerLabel.Text                  = string.format("%.0fs", REVIVE_COUNTDOWN)
-    timerLabel.Parent                = billboard
+	-- Billboard nama di atas anchor
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.new(0, 200, 0, 50)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = false
+	billboard.Adornee = anchor
+	billboard.Parent = anchor
 
-    -- ProximityPrompt untuk revive
-    local prompt = Instance.new("ProximityPrompt")
-    prompt.ActionText            = "Selamatkan"
-    prompt.ObjectText            = player.Name
-    prompt.HoldDuration          = REVIVE_HOLD
-    prompt.MaxActivationDistance = PROMPT_DISTANCE
-    prompt.KeyboardKeyCode       = Enum.KeyCode.E
-    prompt.RequiresLineOfSight   = false
-    prompt.Parent                = anchor
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.TextColor3 = Color3.fromRGB(220, 220, 255)
+	nameLabel.TextSize = 16
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Text = "💀 " .. player.Name
+	nameLabel.Parent = billboard
 
-    return anchor, prompt, timerLabel
+	local timerLabel = Instance.new("TextLabel")
+	timerLabel.Name = "TimerLabel"
+	timerLabel.Size = UDim2.new(1, 0, 0.4, 0)
+	timerLabel.Position = UDim2.new(0, 0, 0.6, 0)
+	timerLabel.BackgroundTransparency = 1
+	timerLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	timerLabel.TextSize = 13
+	timerLabel.Font = Enum.Font.Gotham
+	timerLabel.Text = string.format("%.0fs", REVIVE_COUNTDOWN)
+	timerLabel.Parent = billboard
+
+	-- ProximityPrompt untuk revive
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Selamatkan"
+	prompt.ObjectText = player.Name
+	prompt.HoldDuration = REVIVE_HOLD
+	prompt.MaxActivationDistance = PROMPT_DISTANCE
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = anchor
+
+	return anchor, prompt, timerLabel
 end
 
 -- ─────────────────────────────────────────────
 --  REVIVE PLAYER
 -- ─────────────────────────────────────────────
 local function revivePlayer(downedPlayer: Player, rescuer: Player)
-    local state = downedState[downedPlayer.UserId]
-    if not state or state.permanent then return end
+	local state = downedState[downedPlayer.UserId]
+	if not state or state.permanent then
+		return
+	end
 
-    -- Cancel countdown
-    if state.thread then
-        task.cancel(state.thread)
-        state.thread = nil
-    end
+	-- Cancel countdown
+	if state.thread then
+		task.cancel(state.thread)
+		state.thread = nil
+	end
 
-    cleanupAnchor(downedPlayer.UserId)
-    downedState[downedPlayer.UserId] = nil
+	cleanupAnchor(downedPlayer.UserId)
+	downedState[downedPlayer.UserId] = nil
 
-    -- Respawn player
-    downedPlayer:LoadCharacter()
+	-- Respawn player
+	-- Respawn player (Cast to 'any' to silence the false positive LSP warning)
+	(downedPlayer :: any):LoadCharacter() -- DeprecatedApi: Member 'LoadCharacter' is deprecated
 
-    -- Tunggu karakter selesai load, lalu set HP full
-    task.spawn(function()
-        local newChar = downedPlayer.Character
-            or downedPlayer.CharacterAdded:Wait()
-        local hum = newChar:WaitForChild("Humanoid", 5)
-        if hum then
-            hum.Health = hum.MaxHealth
-        end
+	-- Tunggu karakter selesai load, lalu set HP full
+	task.spawn(function()
+		local newChar = downedPlayer.Character or downedPlayer.CharacterAdded:Wait()
+		local hum = newChar:WaitForChild("Humanoid", 5)
+		if hum then
+			hum.Health = hum.MaxHealth
+		end
 
-        -- Posisikan di dekat rescuer kalau bisa
-        local rescuerChar = rescuer.Character
-        local rescuerRoot = rescuerChar and rescuerChar:FindFirstChild("HumanoidRootPart")
-        if rescuerRoot then
-            local spawnCF = rescuerRoot.CFrame * CFrame.new(0, 0, -3)
-            local hrp = newChar:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.CFrame = spawnCF
-            end
-        end
-    end)
+		-- Posisikan di dekat rescuer kalau bisa
+		local rescuerChar = rescuer.Character
+		local rescuerRoot = rescuerChar and rescuerChar:FindFirstChild("HumanoidRootPart")
+		if rescuerRoot then
+			local spawnCF = rescuerRoot.CFrame * CFrame.new(0, 0, -3)
+			local hrp = newChar:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				hrp.CFrame = spawnCF
+			end
+		end
+	end)
 
-    print(string.format("[ReviveSystem] %s di-revive oleh %s", downedPlayer.Name, rescuer.Name))
+	print(string.format("[ReviveSystem] %s di-revive oleh %s", downedPlayer.Name, rescuer.Name))
 
-    RE_PlayerRevived:FireAllClients({
-        playerName   = downedPlayer.Name,
-        rescuerName  = rescuer.Name,
-    })
+	RE_PlayerRevived:FireAllClients({
+		playerName = downedPlayer.Name,
+		rescuerName = rescuer.Name,
+	})
 end
 
 -- ─────────────────────────────────────────────
 --  HANDLE PLAYER DOWNED
 -- ─────────────────────────────────────────────
 local function onPlayerDowned(player: Player, deathPosition: Vector3)
-    -- Kalau sudah downed sebelumnya, cleanup dulu
-    if downedState[player.UserId] then
-        cleanupAnchor(player.UserId)
-        if downedState[player.UserId].thread then
-            task.cancel(downedState[player.UserId].thread)
-        end
-        downedState[player.UserId] = nil
-    end
+	-- SOLO (1 player in server): immediate Game Over, no revive
+	-- if #Players:GetPlayers() <= 1 then
+	-- 	RE_GameOver:FireAllClients()
+	-- 	return
+	-- end
 
-    -- Spawn anchor di posisi mati
-    local anchor, prompt, timerLabel = spawnGhostAnchor(deathPosition, player)
+	-- Kalau sudah downed sebelumnya, cleanup dulu
+	if downedState[player.UserId] then
+		cleanupAnchor(player.UserId)
+		local existingThread = downedState[player.UserId].thread
+		if existingThread then
+			task.cancel(existingThread)
+		end
+		downedState[player.UserId] = nil
+	end
 
-    local state = {
-        player    = player,
-        anchor    = anchor,
-        prompt    = prompt,
-        timeLeft  = REVIVE_COUNTDOWN,
-        thread    = nil,
-        permanent = false,
-    }
-    downedState[player.UserId] = state
+	-- Spawn anchor di posisi mati
+	local anchor, prompt, timerLabel = spawnGhostAnchor(deathPosition, player)
 
-    -- Broadcast downed ke semua client
-    RE_PlayerDowned:FireAllClients({
-        playerName = player.Name,
-        timeLeft   = REVIVE_COUNTDOWN,
-        permanent  = false,
-    })
+	local state = {
+		player = player,
+		anchor = anchor,
+		prompt = prompt,
+		timeLeft = REVIVE_COUNTDOWN,
+		thread = nil,
+		permanent = false,
+	}
+	downedState[player.UserId] = state
 
-    -- Hook prompt triggered → revive
-    prompt.Triggered:Connect(function(rescuer: Player)
-        -- Jangan revive diri sendiri (tidak relevan tapi buat jaga-jaga)
-        if rescuer == player then return end
-        -- Jangan revive kalau sudah permanent
-        local currentState = downedState[player.UserId]
-        if not currentState or currentState.permanent then return end
+	-- Broadcast downed ke semua client
+	RE_PlayerDowned:FireAllClients({
+		playerName = player.Name,
+		timeLeft = REVIVE_COUNTDOWN,
+		permanent = false,
+	})
 
-        revivePlayer(player, rescuer)
-    end)
+	-- Hook prompt triggered → revive
+	prompt.Triggered:Connect(function(rescuer: Player)
+		-- Jangan revive diri sendiri (tidak relevan tapi buat jaga-jaga)
+		if rescuer == player then
+			return
+		end
+		-- Jangan revive kalau sudah permanent
+		local currentState = downedState[player.UserId]
+		if not currentState or currentState.permanent then
+			return
+		end
 
-    -- Countdown thread
-    state.thread = task.spawn(function()
-        local elapsed = 0
-        while elapsed < REVIVE_COUNTDOWN do
-            task.wait(1)
-            elapsed += 1
+		revivePlayer(player, rescuer)
+	end)
 
-            local currentState = downedState[player.UserId]
-            if not currentState then return end  -- sudah di-revive
-            if currentState.permanent then return end
+	-- Countdown thread
+	state.thread = task.spawn(function()
+		local elapsed = 0
+		while elapsed < REVIVE_COUNTDOWN do
+			task.wait(1)
+			elapsed += 1
 
-            currentState.timeLeft = REVIVE_COUNTDOWN - elapsed
+			local currentState = downedState[player.UserId]
+			if not currentState then
+				return
+			end -- sudah di-revive
+			if currentState.permanent then
+				return
+			end
 
-            -- Update timer label di billboard
-            if timerLabel and timerLabel.Parent then
-                timerLabel.Text = string.format("%.0fs", currentState.timeLeft)
-                -- Makin merah saat mendekati 0
-                local ratio = currentState.timeLeft / REVIVE_COUNTDOWN
-                timerLabel.TextColor3 = Color3.new(1, ratio * 0.4, ratio * 0.4)
-            end
+			currentState.timeLeft = REVIVE_COUNTDOWN - elapsed
 
-            -- Broadcast update ke client (untuk countdown UI)
-            RE_PlayerDowned:FireAllClients({
-                playerName = player.Name,
-                timeLeft   = currentState.timeLeft,
-                permanent  = false,
-            })
-        end
+			-- Update timer label di billboard
+			if timerLabel and timerLabel.Parent then
+				timerLabel.Text = string.format("%.0fs", currentState.timeLeft)
+				-- Makin merah saat mendekati 0
+				local ratio = currentState.timeLeft / REVIVE_COUNTDOWN
+				timerLabel.TextColor3 = Color3.new(1, ratio * 0.4, ratio * 0.4)
+			end
 
-        -- Waktu habis → permanent dead
-        makePermanentDead(player.UserId)
-    end)
+			-- Broadcast update ke client (untuk countdown UI)
+			RE_PlayerDowned:FireAllClients({
+				playerName = player.Name,
+				timeLeft = currentState.timeLeft,
+				permanent = false,
+			})
+		end
 
-    print(string.format("[ReviveSystem] %s downed di %s — %ds sebelum permanent",
-        player.Name, tostring(deathPosition), REVIVE_COUNTDOWN))
+		-- Waktu habis → permanent dead
+		makePermanentDead(player.UserId)
+	end)
+
+	print(
+		string.format(
+			"[ReviveSystem] %s downed di %s — %ds sebelum permanent",
+			player.Name,
+			tostring(deathPosition),
+			REVIVE_COUNTDOWN
+		)
+	)
 end
 
 -- ─────────────────────────────────────────────
 --  HOOK HUMANOID.DIED PER CHARACTER
 -- ─────────────────────────────────────────────
 local function hookCharacter(player: Player, character: Model)
-    local humanoid = character:WaitForChild("Humanoid", 10)
-    if not humanoid then return end
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if not humanoid then
+		return
+	end
 
-    local hrp = character:WaitForChild("HumanoidRootPart", 10)
+	local hrp = character:WaitForChild("HumanoidRootPart", 10)
 
-    humanoid.Died:Connect(function()
-        -- Ambil posisi mati sebelum karakter di-destroy
-        local deathPos = hrp and hrp.Position or Vector3.new(0, 5, 0)
-
-        -- Cegah respawn otomatis — kita yang kontrol kapan respawn
-        -- (dengan disable AutoJumpEnabled tidak cukup; perlu set respawn di Players)
-        -- Catatan: RespawnTime di Players harus di-set manual ke nilai besar
-        -- atau handle di sisi ini via CharacterAutoLoads = false (lihat setup di bawah)
-
-        task.wait(0.1)  -- beri sedikit jeda sebelum proses downed
-        onPlayerDowned(player, deathPos)
-    end)
+	humanoid.Died:Connect(function()
+		local deathPos = hrp and hrp.Position or Vector3.new(0, 5, 0)
+		task.wait(1) -- Change this to 1 second so the death UI has time to pop up and camera settles
+		onPlayerDowned(player, deathPos)
+	end)
 end
 
 -- ─────────────────────────────────────────────
@@ -338,38 +370,40 @@ Players.CharacterAutoLoads = false
 
 -- Spawn karakter pertama kali saat player join
 Players.PlayerAdded:Connect(function(player)
-    -- Load karakter pertama kali manual
-    player:LoadCharacter()
+	-- Load karakter pertama kali manual
+	player:LoadCharacter()
 
-    player.CharacterAdded:Connect(function(character)
-        hookCharacter(player, character)
-    end)
+	player.CharacterAdded:Connect(function(character)
+		hookCharacter(player, character)
+	end)
 end)
 
 -- Handle player yang sudah ada sebelum script jalan
 for _, player in ipairs(Players:GetPlayers()) do
-    if player.Character then
-        hookCharacter(player, player.Character)
-    else
-        player:LoadCharacter()
-    end
-    player.CharacterAdded:Connect(function(character)
-        hookCharacter(player, character)
-    end)
+	if player.Character then
+		hookCharacter(player, player.Character)
+	else
+		player:LoadCharacter()
+	end
+	player.CharacterAdded:Connect(function(character)
+		hookCharacter(player, character)
+	end)
 end
 
 -- ─────────────────────────────────────────────
 --  CLEANUP saat player leave
 -- ─────────────────────────────────────────────
 Players.PlayerRemoving:Connect(function(player)
-    local state = downedState[player.UserId]
-    if state then
-        if state.thread then task.cancel(state.thread) end
-        cleanupAnchor(player.UserId)
-        downedState[player.UserId] = nil
-    end
-    -- Cek game over setelah player leave
-    task.defer(checkGameOver)
+	local state = downedState[player.UserId]
+	if state then
+		if state.thread then
+			task.cancel(state.thread)
+		end
+		cleanupAnchor(player.UserId)
+		downedState[player.UserId] = nil
+	end
+	-- Cek game over setelah player leave
+	task.defer(checkGameOver)
 end)
 
 print("[ReviveSystem] Initialized — REVIVE_TIMER:", REVIVE_COUNTDOWN, "s | HOLD:", REVIVE_HOLD, "s")

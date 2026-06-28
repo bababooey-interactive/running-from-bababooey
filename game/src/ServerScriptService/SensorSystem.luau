@@ -55,6 +55,18 @@ CollectionService:GetInstanceRemovedSignal("MapLights"):Connect(function(light)
 end)
 
 -- ─────────────────────────────────────────────
+--  ALIVE PLAYER CHECK
+-- ─────────────────────────────────────────────
+local function isPlayerSenseable(player: Player): boolean
+	local char = player.Character
+	if not char then
+		return false
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	return hum ~= nil and hum.Health > 0
+end
+
+-- ─────────────────────────────────────────────
 --  NOISE STORE
 -- ─────────────────────────────────────────────
 
@@ -191,6 +203,9 @@ function SensorSystem.CheckHearing(monsterPos: Vector3, activeRules: { string })
 	local bestScore = 0
 
 	for _, event in ipairs(noiseEvents) do
+		if event.player and not isPlayerSenseable(event.player) then
+			continue
+		end
 		local dist = (monsterPos - event.position).Magnitude
 		if dist > hearRadius then
 			continue
@@ -220,10 +235,10 @@ function SensorSystem.CheckSmell(monsterPos: Vector3, players: { Player }, activ
 	local closestDist = Constants.MONSTER_SMELL_RADIUS
 
 	for _, player in ipairs(players) do
-		local char = player.Character
-		if not char then
+		if not isPlayerSenseable(player) then
 			continue
 		end
+		local char = player.Character
 		local hrp = char:FindFirstChild("HumanoidRootPart")
 		if not hrp then
 			continue
@@ -288,10 +303,10 @@ function SensorSystem.CheckVision(
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 	for _, player in ipairs(players) do
-		local char = player.Character
-		if not char then
+		if not isPlayerSenseable(player) then
 			continue
 		end
+		local char = player.Character
 		local hrp = char:FindFirstChild("HumanoidRootPart")
 		if not hrp then
 			continue
@@ -344,10 +359,10 @@ function SensorSystem.GetAwarenessForPlayer(
 		return 1.0
 	end
 
-	local char = player.Character
-	if not char then
+	if not isPlayerSenseable(player) then
 		return 0
 	end
+	local char = player.Character
 	local hrp = char:FindFirstChild("HumanoidRootPart")
 	if not hrp then
 		return 0

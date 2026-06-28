@@ -77,8 +77,9 @@ local function killPlayer(player: Player, cause: string)
 		end
 	end
 
+	-- Put this back! This is what triggers your "show a bit, then disappear" UI on the client.
 	RE_PlayerDied:FireAllClients(player.Name, cause)
-	print(string.format("[SurvivalSystem] %s died — cause: %s", player.Name, cause))
+	print(string.format("[SurvivalSystem] %s downed — cause: %s", player.Name, cause))
 end
 
 -- ─────────────────────────────────────────────

@@ -243,7 +243,7 @@ end)
 -- ─────────────────────────────────────────────
 --  HOOK TASK OBJECTS (disable prompt saat selesai)
 -- ─────────────────────────────────────────────
-local function hookTaskObject(obj: BasePart)
+local function hookTaskObject(obj: Instance)
 	local taskType = obj:GetAttribute("TaskType")
 	local taskId = obj:GetAttribute("TaskId")
 	if not taskType or not taskId then
@@ -276,12 +276,14 @@ local function scanTaskObjects()
 		return
 	end
 	for _, obj in ipairs(taskFolder:GetDescendants()) do
-		if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
+		if obj:GetAttribute("TaskType") then
+		--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
 		end
 	end
 	taskFolder.DescendantAdded:Connect(function(obj)
-		if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
+		
+		--if obj:IsA("BasePart") and obj:GetAttribute("TaskType") then
 			hookTaskObject(obj)
 		end
 	end)
