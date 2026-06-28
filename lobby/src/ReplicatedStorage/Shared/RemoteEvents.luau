@@ -58,6 +58,11 @@ local RemoteEvents = {
     -- Server → Client spesifik: kirim progress player saat join lobby
     -- Payload: Types.PlayerProgress { unlockedLevel, highestEndless }
     PlayerProgressLoaded = R("PlayerProgressLoaded"),
+
+    -- ─── TELEPORT ──────────────────────────────────────────────
+    -- Server → Client spesifik: teleport gagal
+    -- Payload: reason (string)
+    TeleportFailed     = R("TeleportFailed"),
 }
 
 return RemoteEvents

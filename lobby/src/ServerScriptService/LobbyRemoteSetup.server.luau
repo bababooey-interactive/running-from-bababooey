@@ -61,5 +61,6 @@ ensureRemote("StartingGame")         -- server→client di room: countdown telep
 
 -- ─── Player Progress ────────────────────────────────────
 ensureRemote("PlayerProgressLoaded") -- server→client spesifik: progress player
+ensureRemote("TeleportFailed")        -- server→client spesifik: teleport gagal
 
 print("[LobbyRemoteSetup] Semua RemoteEvent lobby sudah siap di ReplicatedStorage.Remotes")

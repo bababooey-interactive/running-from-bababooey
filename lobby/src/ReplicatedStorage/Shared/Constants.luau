@@ -13,8 +13,8 @@ local Constants = {}
 -- ─────────────────────────────────────────────
 
 Constants.LOBBY_PLACE_ID = 96377400695084
-Constants.GAME_PLACE_ID  = 80063247865131
-
+Constants.GAME_PLACE_ID  = 123102575803424
+-- Constants.GAME_PLACE_ID = 122432374470343
 -- ─────────────────────────────────────────────
 --  GAME MODES
 -- ─────────────────────────────────────────────

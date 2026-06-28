@@ -44,6 +44,7 @@ local RE = {
 	VoteResultUpdated = R("VoteResultUpdated"),
 	StartingGame = R("StartingGame"),
 	PlayerProgressLoaded = R("PlayerProgressLoaded"),
+	TeleportFailed = R("TeleportFailed"),
 }
 
 -- ============================================================
@@ -265,20 +266,26 @@ end
 -- Bungkus teleport dengan pcall + cek PlaceId, supaya bisa ditest
 -- sebelum Place benar-benar dipublish (Constants.GAME_PLACE_ID = 0
 -- berarti belum di-setup, jadi di-skip dengan print, bukan error).
+local function notifyTeleportFailed(players: { Player }, reason: string)
+	for _, p in ipairs(players) do
+		if p.Parent ~= nil then
+			RE.TeleportFailed:FireClient(p, reason)
+		end
+		teleportingPlayers[p] = nil
+	end
+end
+
 local function teleportPlayersToGame(players: { Player }, level: number, gameMode: string, roomId: string)
 	if Constants.GAME_PLACE_ID == 0 then
-		warn(
-			string.format(
-				"[LobbyRoomManager] GAME_PLACE_ID belum di-set (masih 0). Teleport DI-SKIP. "
-					.. "Akan teleport %d player ke level %d (%s) begitu Place sudah dipublish & ID diisi.",
-				#players,
-				level,
-				gameMode
-			)
+		local msg = string.format(
+			"GAME_PLACE_ID belum di-set (masih 0). Teleport DI-SKIP. "
+				.. "Akan teleport %d player ke level %d (%s) begitu Place sudah dipublish & ID diisi.",
+			#players,
+			level,
+			gameMode
 		)
-		for _, p in ipairs(players) do
-			teleportingPlayers[p] = nil
-		end
+		warn("[LobbyRoomManager] " .. msg)
+		notifyTeleportFailed(players, "Game place ID not configured yet. Please publish the game place first.")
 		return
 	end
 
@@ -290,9 +297,12 @@ local function teleportPlayersToGame(players: { Player }, level: number, gameMod
 
 	if not reserveOk then
 		warn("[LobbyRoomManager] ReserveServer gagal:", reserveErr)
-		for _, p in ipairs(players) do
-			teleportingPlayers[p] = nil
+		local reason = tostring(reserveErr)
+		if string.find(reason, "not published") or string.find(reason, "invalid") or string.find(reason, "not allowed") then
+			reason = "The game place (ID: " .. Constants.GAME_PLACE_ID .. ") is not published or not accessible. "
+				.. "Please open it in Studio and publish it (File > Publish to Roblox)."
 		end
+		notifyTeleportFailed(players, reason)
 		return
 	end
 
@@ -363,9 +373,7 @@ local function teleportPlayersToGame(players: { Player }, level: number, gameMod
 
 	-- Semua retry habis — bersihkan state supaya player bisa coba lagi
 	warn("[LobbyRoomManager] Teleport gagal setelah semua retry. Membersihkan teleportingPlayers.")
-	for _, p in ipairs(players) do
-		teleportingPlayers[p] = nil
-	end
+	notifyTeleportFailed(players, "Teleport failed after " .. MAX_TELEPORT_RETRIES .. " attempts. The game place may not be published. Please publish it and try again.")
 end
 
 local function beginStartingGameSequence(players: { Player }, level: number, gameMode: string, roomId: string)
@@ -663,6 +671,19 @@ end)
 
 for _, player in ipairs(Players:GetPlayers()) do
 	sendProgressToPlayer(player)
+end
+
+-- ============================================================
+-- STARTUP DIAGNOSTIC: verify GAME_PLACE_ID is accessible
+-- ============================================================
+
+if Constants.GAME_PLACE_ID == 0 then
+	warn("[LobbyRoomManager] ⚠ GAME_PLACE_ID is 0 — teleport will be skipped. "
+		.. "Set the correct Place ID in ReplicatedStorage.Shared.Constants after publishing the game place.")
+else
+	print(string.format("[LobbyRoomManager] GAME_PLACE_ID = %d — teleport will target this place. "
+		.. "Make sure it is published (File > Publish to Roblox) or teleport will fail.",
+		Constants.GAME_PLACE_ID))
 end
 
 -- ============================================================

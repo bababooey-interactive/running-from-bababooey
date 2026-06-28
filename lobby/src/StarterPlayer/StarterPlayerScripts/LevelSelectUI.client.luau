@@ -24,6 +24,7 @@ local RE = {
 	VoteForLevel = R("VoteForLevel"),
 	VoteResultUpdated = R("VoteResultUpdated"),
 	StartingGame = R("StartingGame"),
+	TeleportFailed = R("TeleportFailed"),
 }
 
 local LocalPlayer = Players.LocalPlayer
@@ -356,8 +357,23 @@ RE.StartingGame.OnClientEvent:Connect(function(level, gameMode, countdown)
 		end
 
 		countdownLabel.Text = "Teleporting..."
-		task.wait(1)
+		task.wait(3)
 		countdownLabel.Visible = false
 		screenGui.Enabled = false
+	end)
+end)
+
+RE.TeleportFailed.OnClientEvent:Connect(function(reason)
+	-- Show a clear error message when teleport fails
+	countdownLabel.Visible = false
+	actionButton.Active = true
+	actionButton.Text = "START"
+	actionButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+	subtitleLabel.Text = "⚠ Teleport failed: " .. tostring(reason)
+
+	task.delay(8, function()
+		if subtitleLabel.Text:find("Teleport failed") then
+			subtitleLabel.Text = ""
+		end
 	end)
 end)
