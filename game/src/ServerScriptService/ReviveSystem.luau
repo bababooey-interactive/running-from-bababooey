@@ -32,7 +32,7 @@ local RE_GameOver = Remotes:WaitForChild("GameOver")
 -- ─────────────────────────────────────────────
 local REVIVE_COUNTDOWN = Constants.REVIVE_TIMER or 60 -- detik sebelum permanent dead
 local REVIVE_HOLD = 5 -- detik hold prompt
-local PROMPT_DISTANCE = 8 -- stud max aktivasi prompt
+local PROMPT_DISTANCE = 20 -- stud max aktivasi prompt
 local GHOST_ANCHOR_NAME = "GhostAnchor"
 
 -- ─────────────────────────────────────────────
@@ -129,15 +129,14 @@ end
 local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, ProximityPrompt)
 	local anchor = Instance.new("Part")
 	anchor.Name = GHOST_ANCHOR_NAME .. "_" .. player.Name
-	anchor.Size = Vector3.new(3, 4, 3)
+	anchor.Size = Vector3.new(3, 3, 3)
 
 	-- Raise it by 2 studs so it sits ON the ground, not IN the ground
-	anchor.CFrame = CFrame.new(position + Vector3.new(0, 2, 0))
+	-- Set Y offset to exactly half the height (1.5) so it sits flat on the floor
+	anchor.CFrame = CFrame.new(position + Vector3.new(0, 1.5, 0))
 	anchor.Anchored = true
 	anchor.CanCollide = false
-	anchor.CanQuery = true
-
-	-- Make it an actual visible glowing blue hologram so it can't be missed
+	anchor.CanQuery = true -- INI HARUS TRUE BIAR PROMPT BISA DITEKAN	-- Make it an actual visible glowing blue hologram so it can't be missed
 	anchor.Transparency = 0.5
 	anchor.Material = Enum.Material.ForceField
 	anchor.Color = Color3.fromRGB(50, 150, 255)
@@ -155,7 +154,7 @@ local function spawnGhostAnchor(position: Vector3, player: Player): (BasePart, P
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.new(0, 200, 0, 50)
 	billboard.StudsOffset = Vector3.new(0, 3, 0)
-	billboard.AlwaysOnTop = false
+	billboard.AlwaysOnTop = true
 	billboard.Adornee = anchor
 	billboard.Parent = anchor
 
@@ -372,26 +371,22 @@ Players.CharacterAutoLoads = false
 local ReviveSystem = {}
 
 function ReviveSystem.init()
-	-- Spawn karakter pertama kali saat player join
 	Players.PlayerAdded:Connect(function(player)
-		-- Load karakter pertama kali manual
-		player:LoadCharacter()
-
 		player.CharacterAdded:Connect(function(character)
-			hookCharacter(player, character)
+			task.spawn(hookCharacter, player, character)
 		end)
+		player:LoadCharacter()
 	end)
 
-	-- Handle player yang sudah ada sebelum script jalan
 	for _, player in ipairs(Players:GetPlayers()) do
+		player.CharacterAdded:Connect(function(character)
+			task.spawn(hookCharacter, player, character)
+		end)
 		if player.Character then
-			hookCharacter(player, player.Character)
+			task.spawn(hookCharacter, player, player.Character)
 		else
 			player:LoadCharacter()
 		end
-		player.CharacterAdded:Connect(function(character)
-			hookCharacter(player, character)
-		end)
 	end
 
 	-- ─────────────────────────────────────────────
