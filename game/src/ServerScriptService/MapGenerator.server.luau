@@ -31,6 +31,8 @@ local Constants = require(ReplicatedStorage.Shared.Constants)
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MapGeneratedEvent = Remotes:WaitForChild("MapGenerated")
 
+local markOccupied
+
 -- Server-to-Server BindableEvent (dipakai MonsterAI)
 local ServerMapBindable = ReplicatedStorage:FindFirstChild("ServerMapGenerated")
 if not ServerMapBindable then
@@ -734,6 +736,7 @@ local function placeConveyorVisual(mapFolder, col, row, hallInfo)
 	end
 
 	createConveyorZone(mapFolder, col, row, hallInfo)
+	markOccupied(col, row)
 end
 
 -- ============================================================
@@ -769,7 +772,7 @@ end
 -- [row][col] = true kalau sudah occupied.
 local occupiedTiles = {}
 
-local function markOccupied(col, row)
+function markOccupied(col, row)
 	occupiedTiles[row] = occupiedTiles[row] or {}
 	occupiedTiles[row][col] = true
 end
@@ -918,7 +921,7 @@ local function shuffleTiles(tiles)
 	end
 end
 
-local function placeCoalObjects(taskFolder, placeableTiles, level)
+local function placeCoalObjects(taskFolder, placeableTiles, level, grid)
 	if #CoalOptions == 0 then
 		warn("[MapGenerator] Tidak ada asset coal di TaskObjects.Coal, coal di-skip.")
 		return
@@ -933,6 +936,11 @@ local function placeCoalObjects(taskFolder, placeableTiles, level)
 		local tileEntry = table.remove(placeableTiles) -- ambil dari belakang (sudah di-shuffle)
 		if not tileEntry then
 			break
+		end
+
+		local entryTileType = getTile(grid, tileEntry.col, tileEntry.row)  -- tambah ini
+		if entryTileType == Tile.CONVEYOR or entryTileType == Tile.SPAWN then
+			continue
 		end
 
 		local selected = CoalOptions[math.random(1, #CoalOptions)]
@@ -954,7 +962,7 @@ local function placeCoalObjects(taskFolder, placeableTiles, level)
 	end
 end
 
-local function placeLeverObjects(taskFolder, placeableTiles, level)
+local function placeLeverObjects(taskFolder, placeableTiles, level, grid)
 	if not LeverAsset then
 		warn("[MapGenerator] Asset lever_box tidak ditemukan di TaskObjects.Lever, lever di-skip.")
 		return
@@ -965,25 +973,60 @@ local function placeLeverObjects(taskFolder, placeableTiles, level)
 
 	for i = 1, leverCount do
 		local tileEntry = table.remove(placeableTiles)
-		if not tileEntry then
-			break
+		if not tileEntry then break end
+
+		local col, row = tileEntry.col, tileEntry.row
+		local basePos = gridToWorld(col, row)
+
+		-- Cari dinding terdekat (tile WALL di sekitar tile ini)
+		-- dan taruh lever di sisi dinding itu, menghadap ke dalam
+		local wallDir = nil
+		local wallOffset = nil
+
+		local entryTileType = getTile(grid, col, row)  -- tambah ini
+		if entryTileType == Tile.CONVEYOR or entryTileType == Tile.SPAWN then
+			continue
 		end
 
-		local basePos = gridToWorld(tileEntry.col, tileEntry.row)
+		for dirName, dir in pairs(directions) do
+			local neighborCol = col + dir.dx
+			local neighborRow = row + dir.dz
+			local neighborTile = getTile(grid, neighborCol, neighborRow)
 
-		local clone = cloneAsset(
-			LeverAsset,
-			taskFolder,
-			CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
-				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0),
-			LEVER_SCALE,
-			true
-		)
+			if not isWalkable(neighborTile) then
+				-- Dinding ditemukan di arah ini
+				wallDir = dir
+				wallOffset = Vector3.new(
+					dir.dx * (TILE_SIZE / 2 - 0.5), -- mepet ke dinding
+					Constants.WALL_HEIGHT * 0.45 - 4,    -- setengah tinggi dinding
+					dir.dz * (TILE_SIZE / 2 - 0.5)
+				)
+				break
+			end
+		end
+
+		-- Kalau tidak ada dinding sama sekali (tile terbuka semua),
+		-- fallback ke lantai seperti sebelumnya
+		local leverCFrame
+		if wallDir then
+			local leverPos = basePos + wallOffset
+			-- Rotasi menghadap ke dalam (kebalikan arah dinding)
+			local facingAngle = math.rad(wallDir.rotation + 180)
+			-- Miringkan 90 derajat di sumbu X supaya tuas menghadap keluar dinding
+			leverCFrame = CFrame.new(leverPos)
+				* CFrame.Angles(0, facingAngle, 0)
+				* CFrame.Angles(math.rad(-90), 0, 0)
+		else
+			leverCFrame = CFrame.new(basePos + Vector3.new(0, FLOOR_THICKNESS, 0))
+				* CFrame.Angles(0, math.rad(math.random(0, 359)), 0)
+		end
+
+		local clone = cloneAsset(LeverAsset, taskFolder, leverCFrame, LEVER_SCALE, true)
 
 		clone:SetAttribute("TaskType", "lever")
 		clone:SetAttribute("TaskId", string.format("Lever_%02d", i))
 
-		markOccupied(tileEntry.col, tileEntry.row)
+		markOccupied(col, row)
 	end
 end
 
@@ -1287,9 +1330,10 @@ local function placeFoodItems(grid, hallInfo)
 			local tileType = getTile(grid, col, row)
 			local isFireplaceTile = col == hallInfo.fireplaceCol and row == hallInfo.fireplaceRow
 			
-			if not isWalkable(tileType) or tileType == Tile.SPAWN or isFireplaceTile then
+			if not isWalkable(tileType) or tileType == Tile.SPAWN or isFireplaceTile or tileType == Tile.CONVEYOR then
 				continue
 			end
+
 			if math.random() < FOOD_CHANCE then
 				local foodCount = math.random(1, 3) -- Jumlah food per tile (acak 1-3)
 				for _ = 1, foodCount do
@@ -1441,8 +1485,8 @@ function MapGenerator.generateMap(level: number?)
 	local placeableTiles = collectPlaceableTiles(grid, hallInfo)
 	shuffleTiles(placeableTiles)
 
-	placeCoalObjects(taskFolder, placeableTiles, level)
-	placeLeverObjects(taskFolder, placeableTiles, level)
+	placeCoalObjects(taskFolder, placeableTiles, level, grid)
+	placeLeverObjects(taskFolder, placeableTiles, level, grid)
 
 	-- ── Dark Zones (setelah lantern selesai, pakai litTiles) ──
 	placeDarkZones(grid, hallInfo)
@@ -1498,6 +1542,6 @@ end
 -- ============================================================
 
 task.wait(2)
-MapGenerator.generateMap(10)
+MapGenerator.generateMap(3)
 
 return MapGenerator
