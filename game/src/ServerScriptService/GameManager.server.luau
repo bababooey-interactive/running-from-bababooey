@@ -264,6 +264,9 @@ if not RulesBindable then
 	RulesBindable.Name = "RulesBindable"
 	RulesBindable.Parent = Remotes
 end
+
+task.wait()
+
 RulesBindable:Fire(session.rules)
 
 -- ─────────────────────────────────────────────

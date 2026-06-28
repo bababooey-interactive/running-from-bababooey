@@ -268,10 +268,10 @@ end
 -- ─────────────────────────────────────────────
 local function onPlayerDowned(player: Player, deathPosition: Vector3)
 	-- SOLO (1 player in server): immediate Game Over, no revive
-	-- if #Players:GetPlayers() <= 1 then
-	-- 	RE_GameOver:FireAllClients()
-	-- 	return
-	-- end
+	if #Players:GetPlayers() <= 1 then
+		RE_GameOver:FireAllClients()
+		return
+	end
 
 	-- Kalau sudah downed sebelumnya, cleanup dulu
 	if downedState[player.UserId] then
