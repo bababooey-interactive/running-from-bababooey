@@ -89,15 +89,26 @@ end
 local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
 
-local RE_PickupItem  = Remotes:WaitForChild("PickupItem")
-local RE_DropItem    = Remotes:WaitForChild("DropItem")
-local RE_ThrowBoulder = Remotes:WaitForChild("ThrowBoulder")
+local RE_PickupItem    = Remotes:WaitForChild("PickupItem")
+local RE_DropItem      = Remotes:WaitForChild("DropItem")
+local RE_ThrowBoulder   = Remotes:WaitForChild("ThrowBoulder")
+local RE_HeldItemChanged = Remotes:WaitForChild("HeldItemChanged")
 
 local MAX_BOULDER_DIST = 12
 local THROWABLE_NAMES  = { boulder_small = true, boulder_medium = true }
 
 local nearbyBoulder: BasePart? = nil
 local isHoldingBoulder = false
+local isHoldingAnyItem = false  -- sinkronisasi dengan ItemInteract via HeldItemChanged
+
+-- Dengarkan HeldItemChanged agar tahu jika player sedang memegang item lain
+RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category)
+	if whoPlayer ~= LocalPlayer then return end
+	isHoldingAnyItem = itemModel ~= nil
+	if itemModel and category ~= "boulder" then
+		isHoldingBoulder = false
+	end
+end)
 
 -- Highlight
 local highlight = Instance.new("SelectionBox")
@@ -110,6 +121,7 @@ highlight.Parent = workspace
 -- Cari boulder terdekat di GeneratedMap
 local function findNearbyBoulder(): BasePart?
     if isHoldingBoulder then return nil end
+    if isHoldingAnyItem then return nil end
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return nil end
@@ -140,7 +152,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             RE_DropItem:FireServer()
             isHoldingBoulder = false
             highlight.Adornee = nil
-        elseif nearbyBoulder then
+        elseif nearbyBoulder and not isHoldingAnyItem then
             -- Pickup: boulder adalah Model atau Part, kirim parent Model-nya
             local target = nearbyBoulder
             -- Kalau Part, cari parent Model-nya
@@ -180,6 +192,7 @@ end)
 -- Reset saat karakter respawn
 LocalPlayer.CharacterAdded:Connect(function()
     isHoldingBoulder = false
+    isHoldingAnyItem = false
     nearbyBoulder = nil
     highlight.Adornee = nil
 end)

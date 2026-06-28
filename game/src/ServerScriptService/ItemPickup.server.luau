@@ -37,7 +37,12 @@ local THROWABLE_BOULDER_NAMES = {
 	boulder_small = true,
 	boulder_medium = true,
 }
-local CARRY_WELD_OFFSET = CFrame.new(0, -0.15, -1.2) * CFrame.Angles(math.rad(-20), 0, 0)
+-- Offset dekat tangan agar item tidak mengambang
+local CARRY_WELD_OFFSET = CFrame.new(0, -0.05, -0.35) * CFrame.Angles(math.rad(-20), 0, 0)
+-- Meat: pegang tulang (Handle), rotasi 90° di Y agar sumbu panjang X menghadap -Z (lurus ke depan)
+local MEAT_WELD_OFFSET = CFrame.new(0, -0.05, -0.35) * CFrame.Angles(0, math.rad(90), 0)
+-- Water bottle: sedikit lebih rendah dan tegak
+local BOTTLE_WELD_OFFSET = CFrame.new(0, -0.1, -0.35) * CFrame.Angles(math.rad(-10), 0, 0)
 
 -- ── State ──────────────────────────────────────────────────────
 local heldItems = {}
@@ -104,16 +109,46 @@ local function isWaterItem(modelName: string): boolean
 	return modelName:lower():find("water") ~= nil
 end
 
+-- Cari Handle part dari Tool di dalam food model
+local function getHandlePart(itemModel)
+	if itemModel:IsA("Model") then
+		for _, child in ipairs(itemModel:GetChildren()) do
+			if child:IsA("Tool") then
+				local handle = child:FindFirstChild("Handle")
+				if handle and handle:IsA("BasePart") then
+					return handle
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Tentukan offset berdasarkan jenis item
+local function getCarryOffset(itemModel)
+	local name = itemModel.Name:lower()
+	if name:find("meat") then
+		return MEAT_WELD_OFFSET
+	elseif name:find("water") or name:find("bottle") then
+		return BOTTLE_WELD_OFFSET
+	end
+	return CARRY_WELD_OFFSET
+end
+
 local function weldItemToHand(character, itemModel)
 	local hand = getRightHand(character)
 	if not hand then
 		return nil
 	end
 
-	local itemPart = getPrimaryOrFirstPart(itemModel)
+	-- Untuk food items, pakai Handle dari Tool; untuk lainnya pakai primary/first part
+	local itemPart = getHandlePart(itemModel) or getPrimaryOrFirstPart(itemModel)
 	if not itemPart then
 		return nil
 	end
+
+	-- Offset per jenis item
+	local carryOffset = getCarryOffset(itemModel)
 
 	for _, desc in ipairs(itemModel:GetDescendants()) do
 		if desc:IsA("BasePart") then
@@ -124,7 +159,11 @@ local function weldItemToHand(character, itemModel)
 	itemPart.Anchored = false
 	itemPart.CanCollide = false
 
-	itemModel:PivotTo(hand.CFrame * CARRY_WELD_OFFSET)
+	-- Posisikan model berdasarkan itemPart (Handle), bukan pivot model
+	-- Hitung offset relatif dari itemPart ke pivot, lalu PivotTo sehingga
+	-- itemPart berada di hand.CFrame * carryOffset
+	local relativeOffset = itemPart.CFrame:ToObjectSpace(itemModel:GetPivot())
+	itemModel:PivotTo((hand.CFrame * carryOffset) * relativeOffset)
 
 	local weld = Instance.new("WeldConstraint")
 	weld.Name = "CarryWeld"

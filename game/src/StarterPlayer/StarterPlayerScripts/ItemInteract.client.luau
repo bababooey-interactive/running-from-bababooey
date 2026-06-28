@@ -149,7 +149,7 @@ local function createEatGui(itemModel)
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(1, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Text = "[E] Makan   [Q] Drop"
+	label.Text = "[Klik Kiri / T] Makan   [Q] Drop"
 	label.TextColor3 = Color3.fromRGB(255, 230, 160)
 	label.TextScaled = true
 	label.Font = Enum.Font.GothamBold
@@ -530,6 +530,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 				destroyBoulderHintGui()
 				isHoldingBoulder = false
 			end
+		elseif heldCategory == "food" then
+			RE_EatFood:FireServer()
 		end
 	end
 end)
