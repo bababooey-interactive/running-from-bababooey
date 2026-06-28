@@ -35,9 +35,9 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 --  CONFIG
 -- ─────────────────────────────────────────────
 
-local TILE_PX       = 4      -- ukuran 1 tile dalam pixel di minimap
-local MINIMAP_SIZE  = 160    -- lebar & tinggi minimap (pixel) — square
-local REVEAL_RADIUS = 5      -- tile radius yang di-reveal di sekitar player
+local TILE_PX       = 7      -- ukuran 1 tile dalam pixel di minimap (naik dari 4)
+local MINIMAP_SIZE  = 220    -- lebar & tinggi minimap (pixel) — square (naik dari 160)
+local REVEAL_RADIUS = 6      -- tile radius yang di-reveal di sekitar player (naik dari 5)
 local UPDATE_HZ     = 0.08   -- interval update posisi dot (detik)
 local MAP_OFFSET_X  = 12     -- jarak dari kiri layar
 local MAP_OFFSET_Y  = 52     -- jarak dari atas layar (di bawah Roblox buttons)
@@ -87,7 +87,7 @@ screenGui.Parent         = PlayerGui
 local mapContainer = Instance.new("Frame")
 mapContainer.Name                  = "MapContainer"
 mapContainer.Position              = UDim2.new(0, MAP_OFFSET_X, 0, MAP_OFFSET_Y)
-mapContainer.Size                  = UDim2.new(0, MINIMAP_SIZE + 4, 0, MINIMAP_SIZE + 4)
+mapContainer.Size                  = UDim2.new(0, MINIMAP_SIZE + 4, 0, MINIMAP_SIZE + 4)  -- 224x224
 mapContainer.BackgroundColor3      = COLOR.BORDER
 mapContainer.BorderSizePixel       = 0
 mapContainer.Parent                = screenGui
@@ -385,14 +385,15 @@ RunService.Heartbeat:Connect(function()
     playerDot.Position = UDim2.new(0, centerPx, 0, centerPx)
 
     -- Arah player (rotasi kasar berdasarkan LookVector)
+    -- FIX: hapus negasi — -look.X dan -look.Z membalik arah 180°
     local look = hrp.CFrame.LookVector
-    local angleDeg = math.deg(math.atan2(-look.X, -look.Z))
+    local angleDeg = math.deg(math.atan2(look.X, look.Z))
 
     -- Rotasi indicator arah (geser ke atas dari center dot)
     local RAD   = math.rad(angleDeg)
     local DIST  = 7  -- jarak dari pusat dot (pixel)
     local dirPx = centerPx + math.sin(RAD) * DIST
-    local dirPy = centerPx - math.cos(RAD) * DIST
+    local dirPy = centerPx + math.cos(RAD) * DIST  -- FIX: + bukan - (maju = bawah di grid)
     playerDir.Position = UDim2.new(0, dirPx, 0, dirPy)
 end)
 
