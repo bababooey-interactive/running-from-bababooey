@@ -74,7 +74,7 @@ local FLOOR_THICKNESS = 0.4282493591308594 * FLOOR_SCALE -- ≈ 0.853 studs (ket
 
 local PROP_SCALE = 1.5
 local FOOD_SCALE = 1.5
-local COAL_SCALE = 2
+local COAL_SCALE = 4
 local LEVER_SCALE = 5
 local FIREPLACE_SCALE = 7
 local CONVEYOR_SCALE = 4
@@ -1489,7 +1489,7 @@ function MapGenerator.generateMap(level: number?)
 	placeLeverObjects(taskFolder, placeableTiles, level, grid)
 
 	-- ── Dark Zones (setelah lantern selesai, pakai litTiles) ──
-	placeDarkZones(grid, hallInfo)
+	--placeDarkZones(grid, hallInfo)
 
 	-- ── Food Items ──
 	placeFoodItems(grid, hallInfo)
