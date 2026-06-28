@@ -1,66 +1,50 @@
 -- =============================================================
---  LobbyRemoteSetup.server.luau
---  Buat semua RemoteEvent lobby sekaligus — jalankan SEKALI dari server
+--  LobbyRemoteSetup.server.luau  (updated — adds plate remotes)
 --  Path: lobby/src/ServerScriptService/LobbyRemoteSetup.server.luau
---
---  Pola sama persis dengan RemoteSetup.server.luau yang ada di Game
---  Place — supaya konsisten. Daftar nama remote di sini HARUS sama
---  dengan yang dipakai RemoteEvents.luau (ReplicatedStorage.Shared
---  atau lobby/src/ReplicatedStorage/Remotes, sesuaikan kalau beda).
---
---  PENTING: script ini HARUS jalan & selesai SEBELUM LobbyRoomManager
---  dan LevelSelectUI memanggil WaitForChild("Remotes"). Default Studio
---  menjalankan script di ServerScriptService secara concurrent (semua
---  langsung start bersamaan, BUKAN alfabetis terurut), jadi:
---  - Script lain pakai ReplicatedStorage:WaitForChild("Remotes") tetap
---    AMAN walau LobbyRemoteSetup belum selesai — WaitForChild akan
---    nunggu sampai folder ini dibuat, bukan langsung error.
---  - Yang TIDAK aman adalah kalau script lain pakai dot notation
---    langsung (ReplicatedStorage.Remotes.Xxx) tanpa WaitForChild,
---    itu bisa race condition. Pastikan semua script pemakai Remotes
---    pakai WaitForChild, bukan dot notation langsung.
 -- =============================================================
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Pastikan folder Remotes ada
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not Remotes then
-    Remotes = Instance.new("Folder")
-    Remotes.Name   = "Remotes"
-    Remotes.Parent = ReplicatedStorage
+	Remotes = Instance.new("Folder")
+	Remotes.Name = "Remotes"
+	Remotes.Parent = ReplicatedStorage
 end
 
 local function ensureRemote(name: string)
-    local existing = Remotes:FindFirstChild(name)
-    if existing then
-        return existing
-    end
-    local re = Instance.new("RemoteEvent")
-    re.Name   = name
-    re.Parent = Remotes
-    return re
+	if Remotes:FindFirstChild(name) then
+		return
+	end
+	local re = Instance.new("RemoteEvent")
+	re.Name = name
+	re.Parent = Remotes
 end
 
 -- ─── Room List ──────────────────────────────────────────
-ensureRemote("RoomListUpdated")      -- server→all: daftar room yang tersedia
-ensureRemote("RoomStateUpdated")     -- server→client di room: state room berubah
+ensureRemote("RoomListUpdated")
+ensureRemote("RoomStateUpdated")
 
 -- ─── Room Management ────────────────────────────────────
-ensureRemote("CreateRoom")           -- client→server: buat room baru
-ensureRemote("JoinRoom")             -- client→server: join room yang ada
-ensureRemote("LeaveRoom")            -- client→server: keluar room sebelum start
-ensureRemote("PlayerReadyUp")        -- client→server: player ready
+ensureRemote("CreateRoom")
+ensureRemote("JoinRoom")
+ensureRemote("LeaveRoom")
+ensureRemote("PlayerReadyUp")
 
 -- ─── Level Voting ───────────────────────────────────────
-ensureRemote("VoteForLevel")         -- client→server: player memilih level
-ensureRemote("VoteResultUpdated")    -- server→client di room: hasil vote real-time
+ensureRemote("VoteForLevel")
+ensureRemote("VoteResultUpdated")
 
 -- ─── Game Start ─────────────────────────────────────────
-ensureRemote("StartingGame")         -- server→client di room: countdown teleport
+ensureRemote("StartingGame")
 
 -- ─── Player Progress ────────────────────────────────────
-ensureRemote("PlayerProgressLoaded") -- server→client spesifik: progress player
-ensureRemote("TeleportFailed")        -- server→client spesifik: teleport gagal
+ensureRemote("PlayerProgressLoaded")
+ensureRemote("TeleportFailed")
 
-print("[LobbyRemoteSetup] Semua RemoteEvent lobby sudah siap di ReplicatedStorage.Remotes")
+-- ─── Plate Interaction ──────────────────────────────────
+ensureRemote("EnterPlate") -- client→server: roomMode (string), index (number)
+ensureRemote("LeavePlate") -- client→server: (no payload)
+ensureRemote("PlateOccupied") -- server→all:   { [plateKey] = playerName }
+
+print("[LobbyRemoteSetup] All lobby RemoteEvents ready.")
