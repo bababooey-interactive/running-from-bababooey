@@ -277,81 +277,48 @@ end
 
 local function teleportPlayersToGame(players: { Player }, level: number, gameMode: string, roomId: string)
 	if Constants.GAME_PLACE_ID == 0 then
-		local msg = string.format(
-			"GAME_PLACE_ID belum di-set (masih 0). Teleport DI-SKIP. "
-				.. "Akan teleport %d player ke level %d (%s) begitu Place sudah dipublish & ID diisi.",
-			#players,
-			level,
-			gameMode
-		)
-		warn("[LobbyRoomManager] " .. msg)
-		notifyTeleportFailed(players, "Game place ID not configured yet. Please publish the game place first.")
+		warn("[LobbyRoomManager] GAME_PLACE_ID is 0 — teleport skipped.")
+		notifyTeleportFailed(players, "Game place ID not configured.")
 		return
 	end
 
-	-- Reserve private server supaya tiap room (solo/coop) dapat instance sendiri
-	local accessCode, privateServerId
-	local reserveOk, reserveErr = pcall(function()
-		accessCode, privateServerId = TeleportService:ReserveServer(Constants.GAME_PLACE_ID)
-	end)
+	-- 1. Use the modern TeleportOptions setup
+	local teleportOptions = Instance.new("TeleportOptions")
+	teleportOptions.ShouldReserveServer = true -- The magic bullet: creates a private room automatically
+	teleportOptions:SetTeleportData({
+		level = level,
+		mode = gameMode,
+		roomId = roomId,
+	})
 
-	if not reserveOk then
-		warn("[LobbyRoomManager] ReserveServer gagal:", reserveErr)
-		local reason = tostring(reserveErr)
-		if string.find(reason, "not published") or string.find(reason, "invalid") or string.find(reason, "not allowed") then
-			reason = "The game place (ID: " .. Constants.GAME_PLACE_ID .. ") is not published or not accessible. "
-				.. "Please open it in Studio and publish it (File > Publish to Roblox)."
-		end
-		notifyTeleportFailed(players, reason)
-		return
-	end
-
-	print(
-		string.format("[LobbyRoomManager] Reserved server untuk room %s (privateServerId: %s)", roomId, privateServerId)
-	)
-
-	-- Retry loop: filter disconnected players sebelum setiap attempt
+	-- 2. Attempt the teleport
 	for attempt = 1, MAX_TELEPORT_RETRIES do
 		local validPlayers = {}
 		for _, p in ipairs(players) do
 			if p.Parent ~= nil then
 				table.insert(validPlayers, p)
 			else
-				warn(
-					string.format(
-						"[LobbyRoomManager] %s disconnect sebelum teleport attempt %d, di-skip.",
-						p.Name,
-						attempt
-					)
-				)
 				teleportingPlayers[p] = nil
 			end
 		end
 
 		if #validPlayers == 0 then
-			warn("[LobbyRoomManager] Semua player disconnect sebelum teleport. Dibatalkan.")
+			warn("[LobbyRoomManager] All players disconnected before teleport.")
 			return
 		end
 
-		local teleportOptions = Instance.new("TeleportOptions")
-		teleportOptions:SetReservedServerAccessCode(accessCode)
-		teleportOptions:SetTeleportData({
-			level = level,
-			mode = gameMode,
-			roomId = roomId,
-		})
-
+		-- 3. Use TeleportAsync (the modern, unified method)
 		local ok, err = pcall(function()
-			TeleportService:TeleportAsync(Constants.GAME_PLACE_ID, validPlayers, teleportOptions)
+			return TeleportService:TeleportAsync(Constants.GAME_PLACE_ID, validPlayers, teleportOptions)
 		end)
 
 		if ok then
 			print(
 				string.format(
-					"[LobbyRoomManager] Teleport berhasil (attempt %d) untuk %d player ke room %s.",
+					"[LobbyRoomManager] Teleport OK (attempt %d) — %d player(s) → level %d",
 					attempt,
 					#validPlayers,
-					roomId
+					level
 				)
 			)
 			return
@@ -359,7 +326,7 @@ local function teleportPlayersToGame(players: { Player }, level: number, gameMod
 
 		warn(
 			string.format(
-				"[LobbyRoomManager] Teleport gagal (attempt %d/%d): %s",
+				"[LobbyRoomManager] Teleport failed (attempt %d/%d): %s",
 				attempt,
 				MAX_TELEPORT_RETRIES,
 				tostring(err)
@@ -371,9 +338,10 @@ local function teleportPlayersToGame(players: { Player }, level: number, gameMod
 		end
 	end
 
-	-- Semua retry habis — bersihkan state supaya player bisa coba lagi
-	warn("[LobbyRoomManager] Teleport gagal setelah semua retry. Membersihkan teleportingPlayers.")
-	notifyTeleportFailed(players, "Teleport failed after " .. MAX_TELEPORT_RETRIES .. " attempts. The game place may not be published. Please publish it and try again.")
+	notifyTeleportFailed(
+		players,
+		"Teleport failed after " .. MAX_TELEPORT_RETRIES .. " attempts. Are you testing in Studio?"
+	)
 end
 
 local function beginStartingGameSequence(players: { Player }, level: number, gameMode: string, roomId: string)
@@ -678,12 +646,18 @@ end
 -- ============================================================
 
 if Constants.GAME_PLACE_ID == 0 then
-	warn("[LobbyRoomManager] ⚠ GAME_PLACE_ID is 0 — teleport will be skipped. "
-		.. "Set the correct Place ID in ReplicatedStorage.Shared.Constants after publishing the game place.")
+	warn(
+		"[LobbyRoomManager] ⚠ GAME_PLACE_ID is 0 — teleport will be skipped. "
+			.. "Set the correct Place ID in ReplicatedStorage.Shared.Constants after publishing the game place."
+	)
 else
-	print(string.format("[LobbyRoomManager] GAME_PLACE_ID = %d — teleport will target this place. "
-		.. "Make sure it is published (File > Publish to Roblox) or teleport will fail.",
-		Constants.GAME_PLACE_ID))
+	print(
+		string.format(
+			"[LobbyRoomManager] GAME_PLACE_ID = %d — teleport will target this place. "
+				.. "Make sure it is published (File > Publish to Roblox) or teleport will fail.",
+			Constants.GAME_PLACE_ID
+		)
+	)
 end
 
 -- ============================================================

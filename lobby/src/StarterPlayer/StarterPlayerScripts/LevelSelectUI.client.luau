@@ -364,16 +364,33 @@ RE.StartingGame.OnClientEvent:Connect(function(level, gameMode, countdown)
 end)
 
 RE.TeleportFailed.OnClientEvent:Connect(function(reason)
-	-- Show a clear error message when teleport fails
+	-- Stop the countdown UI
 	countdownLabel.Visible = false
+
+	-- Reset state so they can try again
+	isReady = false
 	actionButton.Active = true
-	actionButton.Text = "START"
-	actionButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+
+	-- Restore correct button visuals based on mode
+	if currentRoomInfo and currentRoomInfo.roomMode == "COOP" then
+		actionButton.Text = "READY UP"
+		actionButton.BackgroundColor3 = Color3.fromRGB(80, 170, 100)
+	else
+		actionButton.Text = "START"
+		actionButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+	end
+
+	-- Show the error message
 	subtitleLabel.Text = "⚠ Teleport failed: " .. tostring(reason)
 
 	task.delay(8, function()
 		if subtitleLabel.Text:find("Teleport failed") then
-			subtitleLabel.Text = ""
+			-- Safely restore the subtitle back to the room mode
+			if currentRoomInfo then
+				subtitleLabel.Text = string.format("Mode: %s", currentRoomInfo.roomMode)
+			else
+				subtitleLabel.Text = ""
+			end
 		end
 	end)
 end)
