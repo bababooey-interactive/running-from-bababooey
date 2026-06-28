@@ -1541,7 +1541,7 @@ end
 --   MapGenerator.generateMap(session.level)
 -- ============================================================
 
-task.wait(2)
-MapGenerator.generateMap(3)
+--task.wait(2)
+--MapGenerator.generateMap(3)
 
 return MapGenerator

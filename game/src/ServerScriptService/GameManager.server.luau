@@ -24,6 +24,7 @@ local TeleportService = game:GetService("TeleportService")
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local TaskSystem = require(script.Parent.TaskSystem)
 local SurvivalSystem = require(script.Parent.SurvivalSystem)
+local MapGenerator = require(script.Parent.MapGenerator)
 
 -- ─────────────────────────────────────────────
 --  RANDOM RULE PICKER
@@ -133,7 +134,7 @@ end
 --
 --  Fallback: level 1, rules di-random dari pool (bukan hardcode lagi)
 -- ─────────────────────────────────────────────
-local function getSessionData(): { level: number, rules: { string }, mode: string }
+local function getSessionData()  --: { level: number, rules: { string }, mode: string }
 	-- Ambil dari player pertama yang masuk
 	local firstPlayer = Players:GetPlayers()[1]
 	if firstPlayer then
@@ -199,7 +200,12 @@ end
 -- ─────────────────────────────────────────────
 math.randomseed(os.time())
 
+-- Tunggu player pertama join supaya GetJoinData() bisa dibaca
+local firstPlayer = Players:GetPlayers()[1] 
+    or Players.PlayerAdded:Wait()
+
 local session = getSessionData()
+MapGenerator.generateMap(session.level)
 
 print(
 	string.format(
