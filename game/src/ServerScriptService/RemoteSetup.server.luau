@@ -70,4 +70,8 @@ ensureRemote("CoalPickedUp") -- server→client: konfirmasi pickup berhasil (tas
 ensureRemote("PullLever") -- client→server: player pull lever (taskId)
 ensureRemote("LeverPulled") -- server→all: broadcast animasi lever (taskId)
 
+-- Revive system
+ensureRemote("PlayerDowned")   -- server→all: { playerName, timeLeft, permanent }
+ensureRemote("PlayerRevived")  -- server→all: { playerName, rescuerName }
+
 print("[RemoteSetup] Semua RemoteEvent sudah siap di ReplicatedStorage.Remotes")
