@@ -932,7 +932,7 @@ local function placeCoalObjects(taskFolder, placeableTiles, level, grid)
 	-- batas #CoalOptions*3 cuma jaga-jaga supaya tidak nyoba taruh ribuan
 	-- coal kalau level sangat tinggi & tile placeable banyak sekali
 
-	for i = 1, coalCount do
+	for i = 0, coalCount do
 		local tileEntry = table.remove(placeableTiles) -- ambil dari belakang (sudah di-shuffle)
 		if not tileEntry then
 			break
@@ -971,7 +971,7 @@ local function placeLeverObjects(taskFolder, placeableTiles, level, grid)
 	local extra = math.max(0, level - 1) * Constants.TASK_ADD_PER_LEVEL
 	local leverCount = math.min(Constants.TASK_LEVER_COUNT + extra, #placeableTiles)
 
-	for i = 1, leverCount do
+	for i = 0, leverCount do
 		local tileEntry = table.remove(placeableTiles)
 		if not tileEntry then break end
 
