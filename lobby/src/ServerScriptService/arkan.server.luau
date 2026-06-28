@@ -1,1 +1,0 @@
-print("aang kerjain anjink")
