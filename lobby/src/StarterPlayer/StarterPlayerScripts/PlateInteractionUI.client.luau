@@ -25,7 +25,8 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RE_EnterPlate = Remotes:WaitForChild("EnterPlate") :: RemoteEvent
 local RE_LeavePlate = Remotes:WaitForChild("LeavePlate") :: RemoteEvent
 local RE_PlateOccupied = Remotes:WaitForChild("PlateOccupied") :: RemoteEvent
-local _RE_LeaveRoom = Remotes:WaitForChild("LeaveRoom") :: RemoteEvent
+local RE_LeaveRoom = Remotes:WaitForChild("LeaveRoom") :: RemoteEvent
+local RE_CreateRoom = Remotes:WaitForChild("CreateRoom") :: RemoteEvent
 
 -- ============================================================
 -- CONFIG
@@ -321,12 +322,18 @@ end
 local lastNearEntry: PlateEntry? = nil
 
 actionBtn.MouseButton1Click:Connect(function()
-	local isSelf = myPlate ~= nil
-
-	if isSelf then
+	-- FIX: Check `myPlate` directly instead of using a boolean variable
+	-- so the Luau type-checker knows it's not nil inside the block.
+	if myPlate then
 		-- LEAVE
+		local mode = myPlate.roomMode
 		myPlate = nil
 		RE_LeavePlate:FireServer()
+
+		-- Tell LobbyRoomManager to remove us from the Coop Room
+		if mode == "COOP" then
+			RE_LeaveRoom:FireServer()
+		end
 
 		-- Also close LevelSelectUI
 		local lsGui = PlayerGui:FindFirstChild("LevelSelectGui")
@@ -350,11 +357,13 @@ actionBtn.MouseButton1Click:Connect(function()
 
 		myPlate = { roomMode = entry.roomMode, index = entry.index }
 		RE_EnterPlate:FireServer(entry.roomMode, entry.index)
-		-- Prompt stays visible but switches to LEAVE mode — updatePromptForPlate
-		-- will handle it on the next loop tick
+
+		-- Tell LobbyRoomManager we want to join the Coop Room!
+		if entry.roomMode == "COOP" then
+			RE_CreateRoom:FireServer("REGULAR", "COOP")
+		end
 	end
 end)
-
 -- ============================================================
 -- OCCUPATION SYNC FROM SERVER
 -- ============================================================
@@ -371,8 +380,12 @@ local function watchLevelSelectGui(lsGui: ScreenGui)
 	lsGui:GetPropertyChangedSignal("Enabled"):Connect(function()
 		if not lsGui.Enabled and myPlate then
 			-- User dismissed the UI without pressing LEAVE — fire leave anyway
+			local mode = myPlate.roomMode
 			myPlate = nil
 			RE_LeavePlate:FireServer()
+			if mode == "COOP" then
+				RE_LeaveRoom:FireServer()
+			end
 		end
 	end)
 end
@@ -435,8 +448,12 @@ end)
 -- Reset on respawn
 LocalPlayer.CharacterAdded:Connect(function()
 	if myPlate then
-		RE_LeavePlate:FireServer()
+		local mode = myPlate.roomMode
 		myPlate = nil
+		RE_LeavePlate:FireServer()
+		if mode == "COOP" then
+			RE_LeaveRoom:FireServer()
+		end
 	end
 	hidePrompt()
 end)

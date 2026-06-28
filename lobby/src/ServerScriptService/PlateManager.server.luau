@@ -48,7 +48,8 @@ local RE_PlateOccupied = ensureRemote("PlateOccupied") -- server→all
 
 -- Also wire up to the existing LobbyRoomManager remotes
 local RE_RoomStateUpdated = Remotes:WaitForChild("RoomStateUpdated") :: RemoteEvent
-local RE_LeaveRoom = Remotes:WaitForChild("LeaveRoom") :: RemoteEvent
+local _RE_LeaveRoom = Remotes:WaitForChild("LeaveRoom") :: RemoteEvent
+local PlayerProgressStore = require(script.Parent.PlayerProgressStore)
 
 -- ============================================================
 -- CONFIG
@@ -133,8 +134,12 @@ local function vacatePlate(player: Player)
 	broadcastOccupation()
 
 	-- Tell LobbyRoomManager the player left their room
-	RE_LeaveRoom:FireServer()
+	-- RE_LeaveRoom:FireServer()
 end
+
+-- ============================================================
+-- ENTER PLATE
+-- ============================================================
 
 -- ============================================================
 -- ENTER PLATE
@@ -201,21 +206,22 @@ RE_EnterPlate.OnServerEvent:Connect(function(player: Player, roomMode: string, i
 
 	print(("[PlateManager] %s entered %s plate #%d"):format(player.Name, roomMode, index))
 
-	-- Fire RoomStateUpdated so LevelSelectUI opens
-	-- (RoomMode, index, maxLevel) — LobbyRoomManager fills the rest
-	-- We send a minimal stub; LobbyRoomManager's plate Touched handler
-	-- fired the full RoomStateUpdated before, now we replicate that here.
-	RE_RoomStateUpdated:FireClient(player, {
-		id = key,
-		hostName = player.Name,
-		gameMode = "REGULAR",
-		roomMode = roomMode,
-		selectedLevel = 1,
-		maxLevel = 10, -- LobbyRoomManager will override with real progress
-		playerCount = 1,
-		maxPlayers = roomMode == "SOLO" and 1 or 8,
-		readyCount = 0,
-	})
+	-- FIX: ONLY send mock state for SOLO.
+	-- For COOP, PlateInteractionUI now triggers LobbyRoomManager, which handles sending the REAL state.
+	if roomMode == "SOLO" then
+		local progress = PlayerProgressStore.Load(player)
+		RE_RoomStateUpdated:FireClient(player, {
+			id = key,
+			hostName = player.Name,
+			gameMode = "REGULAR",
+			roomMode = roomMode,
+			selectedLevel = 1,
+			maxLevel = progress and progress.unlockedLevel or 1,
+			playerCount = 1,
+			maxPlayers = 1,
+			readyCount = 0,
+		})
+	end
 end)
 
 -- ============================================================
