@@ -528,6 +528,123 @@ RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category
 	end
 end)
 
+-- ── Core: Cook Meat ────────────────────────────────────────────
+
+local function startCookingEffect(player)
+    -- Beritahu client untuk tampilkan efek api
+    local RE_CookingEffect = Remotes:FindFirstChild("CookingEffect")
+    if RE_CookingEffect then
+        RE_CookingEffect:FireClient(player, true)
+    end
+end
+
+local function stopCookingEffect(player)
+    local RE_CookingEffect = Remotes:FindFirstChild("CookingEffect")
+    if RE_CookingEffect then
+        RE_CookingEffect:FireClient(player, false)
+    end
+end
+
+local function cookMeat(player)
+    local data = heldItem[player]
+    if not data or data.category ~= "food" then return end
+    if not data.model or not data.model.Name:lower():find("^meat") then return end
+    
+    -- Sudah cooked_meat, skip
+    if data.model.Name:lower():find("cooked") then return end
+
+    local cookedAsset = getCookedMeatAsset()
+    if not cookedAsset then
+        warn("[ItemPickup] cooked_meat asset tidak ditemukan di FoodItems!")
+        return
+    end
+
+    -- Simpan posisi hand sebelum unweld
+    local char = player.Character
+    local hand = getRightHand(char)
+    local handCFrame = hand and hand.CFrame or CFrame.new()
+
+    -- Unweld meat lama
+    unweldItem(data)
+    if data.model and data.model.Parent then
+        data.model:Destroy()
+    end
+    heldItem[player] = nil
+
+    -- Clone cooked_meat dan langsung weld ke tangan
+    local cookedClone = cookedAsset:Clone()
+    cookedClone.Parent = char
+
+    -- Preserve original scale dari attribute (sama seperti placeFoodItems)
+    local originalScale = cookedAsset:GetAttribute("OriginalScale") or 1
+    cookedClone:ScaleTo(originalScale * 1.5)  -- FOOD_SCALE = 1.5
+    cookedClone:PivotTo(handCFrame)
+
+    local newWeld = weldItemToHand(char, cookedClone)
+    if not newWeld then
+        cookedClone:Destroy()
+        return
+    end
+
+    heldItem[player] = { model = cookedClone, category = "food", weld = newWeld }
+    RE_HeldItemChanged:FireAllClients(player, cookedClone, "food")
+
+    stopCookingEffect(player)
+    cookingTimers[player] = nil
+
+    -- Efek suara sizzle saat matang
+    SoundManager.eatFood(cookedClone:GetPivot().Position) -- pakai sound yang ada dulu
+    print(string.format("[ItemPickup] %s's meat is now cooked!", player.Name))
+end
+
+-- ── Cooking Heartbeat (server-side proximity check) ────────────
+
+local RunService = game:GetService("RunService")
+
+RunService.Heartbeat:Connect(function()
+    for player, data in pairs(heldItem) do
+        if data.category ~= "food" then continue end
+        if not data.model then continue end
+        
+        local name = data.model.Name:lower()
+        -- Hanya meat biasa (bukan cooked_meat)
+        if not name:match("^meat") or name:find("cooked") then
+            -- Bukan meat atau sudah cooked — reset timer
+            if cookingTimers[player] then
+                cookingTimers[player] = nil
+                stopCookingEffect(player)
+            end
+            continue
+        end
+
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+
+        local fpPos = getFireplacePosition()
+        if not fpPos then continue end
+
+        local dist = (root.Position - fpPos).Magnitude
+
+        if dist <= COOKING_RADIUS then
+            if not cookingTimers[player] then
+                -- Baru masuk radius api
+                cookingTimers[player] = os.clock()
+                startCookingEffect(player)
+            elseif os.clock() - cookingTimers[player] >= COOKING_TIME then
+                -- Sudah cukup lama dekat api → masak!
+                cookMeat(player)
+            end
+        else
+            -- Keluar dari radius api → reset timer
+            if cookingTimers[player] then
+                cookingTimers[player] = nil
+                stopCookingEffect(player)
+            end
+        end
+    end
+end)
+
 -- ── Per-frame cek jarak fireplace ──────────────────────────────
 
 RunService.Heartbeat:Connect(function()
@@ -586,6 +703,119 @@ player.CharacterAdded:Connect(function(newChar)
 	destroyBoulderHintGui()
 	task.wait(1)
 	doScan()
+end)
+
+-- ── Cooking Effect (api saat meat dipanggang) ──────────────────
+
+local RE_CookingEffect = Remotes:WaitForChild("CookingEffect")
+local cookingGui = nil
+local cookingTween = nil
+
+local function createCookingEffect()
+    if cookingGui then return end
+
+    -- ScreenGui progress bar + teks
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "CookingGui"
+    sg.ResetOnSpawn = false
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 220, 0, 60)
+    frame.Position = UDim2.new(0.5, -110, 0.70, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 15, 5)
+    frame.BackgroundTransparency = 0.1
+    frame.BorderSizePixel = 0
+    frame.Parent = sg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 80, 0)
+    stroke.Thickness = 2
+    stroke.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Name = "CookLabel"
+    label.Size = UDim2.new(1, 0, 0.5, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "🔥  Memanggang Daging..."
+    label.TextColor3 = Color3.fromRGB(255, 180, 60)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.Parent = frame
+
+    -- Progress bar background
+    local barBg = Instance.new("Frame")
+    barBg.Name = "BarBg"
+    barBg.Size = UDim2.new(0.9, 0, 0.25, 0)
+    barBg.Position = UDim2.new(0.05, 0, 0.65, 0)
+    barBg.BackgroundColor3 = Color3.fromRGB(20, 10, 5)
+    barBg.BorderSizePixel = 0
+    barBg.Parent = frame
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(1, 0)
+
+    -- Progress bar fill (mulai dari 0)
+    local barFill = Instance.new("Frame")
+    barFill.Name = "BarFill"
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+    barFill.BorderSizePixel = 0
+    barFill.Parent = barBg
+    Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
+
+    sg.Parent = player.PlayerGui
+    cookingGui = sg
+
+    -- Tween progress bar dari 0 → 100% dalam COOKING_TIME detik
+    local COOKING_TIME_CLIENT = 3  -- harus sama dengan server
+    local TweenService = game:GetService("TweenService")
+    cookingTween = TweenService:Create(
+        barFill,
+        TweenInfo.new(COOKING_TIME_CLIENT, Enum.EasingStyle.Linear),
+        { Size = UDim2.new(1, 0, 1, 0) }
+    )
+    cookingTween:Play()
+
+    -- Flicker warna label seperti api
+    task.spawn(function()
+        local colors = {
+            Color3.fromRGB(255, 180, 60),
+            Color3.fromRGB(255, 100, 20),
+            Color3.fromRGB(255, 220, 80),
+        }
+        local i = 1
+        while cookingGui do
+            label.TextColor3 = colors[i]
+            i = (i % #colors) + 1
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function destroyCookingEffect()
+    if cookingTween then
+        cookingTween:Cancel()
+        cookingTween = nil
+    end
+    if cookingGui then
+        cookingGui:Destroy()
+        cookingGui = nil
+    end
+end
+
+RE_CookingEffect.OnClientEvent:Connect(function(isActive)
+    if isActive then
+        createCookingEffect()
+    else
+        destroyCookingEffect()
+    end
+end)
+
+-- Pastikan efek hilang saat item di-drop
+RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category)
+    -- handler asli sudah ada di atas, ini khusus untuk reset cooking effect
+    if whoPlayer == player and not itemModel then
+        destroyCookingEffect()
+    end
 end)
 
 print("[ItemInteract] Client initialized.")
