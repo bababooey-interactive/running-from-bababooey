@@ -39,13 +39,17 @@ function DuplicationSystem.setGrid(grid: { { number } })
 		entry.brain:setGrid(grid)
 	end
 
-	-- THE FIX: If rules were loaded before the map, spawn the clones NOW.
+	-- FIX: Cache values locally before clearing them so the spawned thread captures them safely!
 	if pendingOriginal and pendingRules then
+		local orig = pendingOriginal
+		local rls = pendingRules
+		local bcast = pendingBroadcast
+
 		-- Wait one tick so the main MonsterAI has time to teleport
 		-- the original monster into the maze before we copy its position!
 		task.spawn(function()
 			task.wait()
-			DuplicationSystem.processRules(pendingOriginal, pendingRules, pendingBroadcast)
+			DuplicationSystem.processRules(orig, rls, bcast)
 		end)
 
 		pendingOriginal = nil
@@ -166,6 +170,9 @@ function DuplicationSystem.processRules(
 			end,
 			onBroadcast = onBroadcastClone,
 		})
+
+		-- FIX: Explicitly apply the active rules to the clone's brain!
+		brain:setRules(rules)
 
 		if gridReady then
 			brain:setGrid(cachedGrid)

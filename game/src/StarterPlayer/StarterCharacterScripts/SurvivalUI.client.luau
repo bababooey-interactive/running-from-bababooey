@@ -170,7 +170,7 @@ local function buildGui()
 	rulesPanel.BackgroundColor3 = C.BG_PANEL
 	rulesPanel.BackgroundTransparency = 0.08
 	rulesPanel.BorderSizePixel = 0
-	rulesPanel.Visible = false
+	rulesPanel.Visible = true
 	rulesPanel.ZIndex = 15
 	rulesPanel.Parent = screenGui
 
@@ -620,7 +620,7 @@ end
 --  RULES PANEL TOGGLE
 -- ─────────────────────────────────────────────
 local function setupPanelToggle(ui)
-	local panelOpen = false
+	local panelOpen = true
 
 	local function openPanel()
 		panelOpen = true
@@ -759,17 +759,17 @@ RE_PlayerDied.OnClientEvent:Connect(function(playerName, cause)
 	end
 end)
 
--- Play client sound locally (e.g. survival feedback warn)
 RE_PlayClientSound.OnClientEvent:Connect(function(soundId, volume)
 	if not soundId or soundId == "" then
 		return
 	end
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = volume or 0.8
-	sound.Parent = game:GetService("SoundService")
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
+
+	local s = Instance.new("Sound")
+	s.SoundId = soundId
+	s.Volume = volume or 0.6
+	s.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	s:Play()
+	s.Ended:Connect(function()
+		s:Destroy()
 	end)
 end)

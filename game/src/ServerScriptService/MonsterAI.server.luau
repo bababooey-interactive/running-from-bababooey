@@ -175,11 +175,13 @@ if RulesBindable and RulesBindable:IsA("BindableEvent") then
 	RulesBindable.Event:Connect(onRulesActivated)
 end
 
--- Fallback: read directly from SessionInfo in case we missed the BindableEvent
-local sessionInfo = ReplicatedStorage:FindFirstChild("SessionInfo")
+-- FIX: Gunakan WaitForChild dengan timeout agar aman menunggu inisialisasi GameManager
+local sessionInfo = ReplicatedStorage:WaitForChild("SessionInfo", 5)
 if sessionInfo then
-	local rulesFolder = sessionInfo:FindFirstChild("ActiveRules")
+	local rulesFolder = sessionInfo:WaitForChild("ActiveRules", 5)
 	if rulesFolder then
+		-- Beri jeda micro-second memastikan seluruh StringValue selesai di-parent oleh GameManager
+		task.wait()
 		local loaded = {}
 		for _, v in ipairs(rulesFolder:GetChildren()) do
 			table.insert(loaded, v.Value)
