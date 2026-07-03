@@ -8,7 +8,7 @@
 
 # Artifacts
 /*.lock
-/*.rbxl
+# /*.rbxl
 /*.rbxlx
 /*.rbxm
 /*.rbxmx
