@@ -62,6 +62,7 @@ ensureRemote("DepositCoal")
 ensureRemote("HeldItemChanged")
 ensureRemote("CoalDeposited")
 ensureRemote("HungerChanged")
+ensureRemote("CookingEffect") 
 -- ── Coal interaction ─────────────────────────
 ensureRemote("PickupCoal") -- client→server: player ambil coal (taskId)
 ensureRemote("CoalPickedUp") -- server→client: konfirmasi pickup berhasil (taskId)
@@ -73,5 +74,6 @@ ensureRemote("LeverPulled") -- server→all: broadcast animasi lever (taskId)
 -- Revive system
 ensureRemote("PlayerDowned")   -- server→all: { playerName, timeLeft, permanent }
 ensureRemote("PlayerRevived")  -- server→all: { playerName, rescuerName }
+ensureRemote("ThrowLantern")
 
 print("[RemoteSetup] Semua RemoteEvent sudah siap di ReplicatedStorage.Remotes")

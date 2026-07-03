@@ -588,4 +588,117 @@ player.CharacterAdded:Connect(function(newChar)
 	doScan()
 end)
 
+-- ── Cooking Effect (api saat meat dipanggang) ──────────────────
+
+local RE_CookingEffect = Remotes:WaitForChild("CookingEffect")
+local cookingGui = nil
+local cookingTween = nil
+
+local function createCookingEffect()
+    if cookingGui then return end
+
+    -- ScreenGui progress bar + teks
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "CookingGui"
+    sg.ResetOnSpawn = false
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 220, 0, 60)
+    frame.Position = UDim2.new(0.5, -110, 0.70, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 15, 5)
+    frame.BackgroundTransparency = 0.1
+    frame.BorderSizePixel = 0
+    frame.Parent = sg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 80, 0)
+    stroke.Thickness = 2
+    stroke.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Name = "CookLabel"
+    label.Size = UDim2.new(1, 0, 0.5, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "🔥  Memanggang Daging..."
+    label.TextColor3 = Color3.fromRGB(255, 180, 60)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.Parent = frame
+
+    -- Progress bar background
+    local barBg = Instance.new("Frame")
+    barBg.Name = "BarBg"
+    barBg.Size = UDim2.new(0.9, 0, 0.25, 0)
+    barBg.Position = UDim2.new(0.05, 0, 0.65, 0)
+    barBg.BackgroundColor3 = Color3.fromRGB(20, 10, 5)
+    barBg.BorderSizePixel = 0
+    barBg.Parent = frame
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(1, 0)
+
+    -- Progress bar fill (mulai dari 0)
+    local barFill = Instance.new("Frame")
+    barFill.Name = "BarFill"
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+    barFill.BorderSizePixel = 0
+    barFill.Parent = barBg
+    Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
+
+    sg.Parent = player.PlayerGui
+    cookingGui = sg
+
+    -- Tween progress bar dari 0 → 100% dalam COOKING_TIME detik
+    local COOKING_TIME_CLIENT = 3  -- harus sama dengan server
+    local TweenService = game:GetService("TweenService")
+    cookingTween = TweenService:Create(
+        barFill,
+        TweenInfo.new(COOKING_TIME_CLIENT, Enum.EasingStyle.Linear),
+        { Size = UDim2.new(1, 0, 1, 0) }
+    )
+    cookingTween:Play()
+
+    -- Flicker warna label seperti api
+    task.spawn(function()
+        local colors = {
+            Color3.fromRGB(255, 180, 60),
+            Color3.fromRGB(255, 100, 20),
+            Color3.fromRGB(255, 220, 80),
+        }
+        local i = 1
+        while cookingGui do
+            label.TextColor3 = colors[i]
+            i = (i % #colors) + 1
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function destroyCookingEffect()
+    if cookingTween then
+        cookingTween:Cancel()
+        cookingTween = nil
+    end
+    if cookingGui then
+        cookingGui:Destroy()
+        cookingGui = nil
+    end
+end
+
+RE_CookingEffect.OnClientEvent:Connect(function(isActive)
+    if isActive then
+        createCookingEffect()
+    else
+        destroyCookingEffect()
+    end
+end)
+
+-- Pastikan efek hilang saat item di-drop
+RE_HeldItemChanged.OnClientEvent:Connect(function(whoPlayer, itemModel, category)
+    -- handler asli sudah ada di atas, ini khusus untuk reset cooking effect
+    if whoPlayer == player and not itemModel then
+        destroyCookingEffect()
+    end
+end)
+
 print("[ItemInteract] Client initialized.")

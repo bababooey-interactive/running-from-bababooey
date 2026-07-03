@@ -215,6 +215,10 @@ local DarkZoneRoom = DarkZonesFolder:WaitForChild("DarkZone_Room") -- ruangan/pe
 local FoodOptions = {}
 for _, child in ipairs(FoodItemsFolder:GetChildren()) do
 	-- Simpan scale asli sebagai Attribute supaya bisa dibaca saat spawn
+	-- Skip cooked_meat — hanya bisa dapat dari memasak di fireplace
+	if child.Name:lower():find("cooked") then
+		continue
+	end
 	local currentScale = 1
 	if child:IsA("Model") then
 		-- Model punya Scale di bawah Pivot
