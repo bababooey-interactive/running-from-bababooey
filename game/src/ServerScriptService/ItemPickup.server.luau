@@ -22,6 +22,8 @@ local TaskSystem = require(script.Parent.TaskSystem)
 local SensorSystem = require(script.Parent.SensorSystem)
 local ServerStorage = game:GetService("ServerStorage")
 local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
+local RunService = game:GetService("RunService")
 
 -- ── Config ─────────────────────────────────────────────────────
 local HUNGER_RESTORE = {
@@ -47,7 +49,7 @@ local CARRY_WELD_OFFSETS = {
 	meat = CFrame.new(0, -0.1, -0.6) * CFrame.Angles(math.rad(-15), math.rad(-90), 0),
 }
 
-local COOKING_RADIUS = 6
+local COOKING_RADIUS = 12
 local COOKING_TIME = 3 -- seconds to cook food in fireplace
 
 -- ── State ──────────────────────────────────────────────────────
@@ -550,121 +552,6 @@ local function throwBoulder(player: Player)
 		end)
 	end)
 end
-
--- ── Core: Cook Meat ────────────────────────────────────────────
-
-local function startCookingEffect(player)
-    -- Beritahu client untuk tampilkan efek api
-    local RE_CookingEffect = Remotes:FindFirstChild("CookingEffect")
-    if RE_CookingEffect then
-        RE_CookingEffect:FireClient(player, true)
-    end
-end
-
-local function stopCookingEffect(player)
-    local RE_CookingEffect = Remotes:FindFirstChild("CookingEffect")
-    if RE_CookingEffect then
-        RE_CookingEffect:FireClient(player, false)
-    end
-end
-
-local function cookMeat(player)
-    local data = heldItems[player]
-    if not data or data.category ~= "food" then return end
-    if not data.model or not data.model.Name:lower():find("^meat") then return end
-    
-    -- Sudah cooked_meat, skip
-    if data.model.Name:lower():find("cooked") then return end
-
-    local cookedAsset = getCookedMeatAsset()
-    if not cookedAsset then
-        warn("[ItemPickup] cooked_meat asset tidak ditemukan di FoodItems!")
-        return
-    end
-
-    -- Simpan posisi hand sebelum unweld
-    local char = player.Character
-    local hand = getRightHand(char)
-    local handCFrame = hand and hand.CFrame or CFrame.new()
-
-    -- Unweld meat lama
-    unweldItem(data)
-    if data.model and data.model.Parent then
-        data.model:Destroy()
-    end
-    heldItems[player] = nil
-
-    -- Clone cooked_meat dan langsung weld ke tangan
-    local cookedClone = cookedAsset:Clone()
-    cookedClone.Parent = char
-
-    -- Preserve original scale dari attribute (sama seperti placeFoodItems)
-	local originalScale = cookedAsset:GetScale()  -- ambil langsung dari model
-	cookedClone:ScaleTo(originalScale)
-    cookedClone:PivotTo(handCFrame)
-
-    local newWeld = weldItemToHand(char, cookedClone)
-    if not newWeld then
-        cookedClone:Destroy()
-        return
-    end
-
-    heldItems[player] = { model = cookedClone, category = "food", weld = newWeld }
-    RE_HeldItemChanged:FireAllClients(player, cookedClone, "food")
-
-    stopCookingEffect(player)
-    cookingTimers[player] = nil
-
-    -- Efek suara sizzle saat matang
-    SoundManager.eatFood(cookedClone:GetPivot().Position) -- pakai sound yang ada dulu
-    print(string.format("[ItemPickup] %s's meat is now cooked!", player.Name))
-end
-
--- ── Cooking Heartbeat (server-side proximity check) ────────────
-
-RunService.Heartbeat:Connect(function()
-    for player, data in pairs(heldItems) do
-        if data.category ~= "food" then continue end
-        if not data.model then continue end
-        
-        local name = data.model.Name:lower()
-        -- Hanya meat biasa (bukan cooked_meat)
-        if not name:match("^meat") or name:find("cooked") then
-            -- Bukan meat atau sudah cooked — reset timer
-            if cookingTimers[player] then
-                cookingTimers[player] = nil
-                stopCookingEffect(player)
-            end
-            continue
-        end
-
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then continue end
-
-        local fpPos = getFireplacePosition()
-        if not fpPos then continue end
-
-        local dist = (root.Position - fpPos).Magnitude
-
-        if dist <= COOKING_RADIUS then
-            if not cookingTimers[player] then
-                -- Baru masuk radius api
-                cookingTimers[player] = os.clock()
-                startCookingEffect(player)
-            elseif os.clock() - cookingTimers[player] >= COOKING_TIME then
-                -- Sudah cukup lama dekat api → masak!
-                cookMeat(player)
-            end
-        else
-            -- Keluar dari radius api → reset timer
-            if cookingTimers[player] then
-                cookingTimers[player] = nil
-                stopCookingEffect(player)
-            end
-        end
-    end
-end)
 
 -- ── Remote Connections ─────────────────────────────────────────
 

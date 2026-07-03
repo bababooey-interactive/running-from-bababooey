@@ -270,6 +270,11 @@ local RE_CookingEffect = Instance.new("RemoteEvent")
 RE_CookingEffect.Name = "CookingEffect"
 RE_CookingEffect.Parent = Remotes
 
+-- Pastikan RemoteEvent ini ada di Remotes folder
+local RE_CookingEffect = Instance.new("RemoteEvent")
+RE_CookingEffect.Name = "CookingEffect"
+RE_CookingEffect.Parent = Remotes
+
 task.wait()
 
 RulesBindable:Fire(session.rules)

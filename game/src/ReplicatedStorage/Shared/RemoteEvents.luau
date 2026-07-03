@@ -90,6 +90,8 @@ local RemoteEvents = {
 	-- Payload: newUnlockedLevel (number)
 	-- Hanya di Regular mode, hanya player yang unlock level baru
 	LevelProgressSaved = R("LevelProgressSaved"),
+
+	ThrowLantern = R("ThrowLantern"),
 }
 
 return RemoteEvents
